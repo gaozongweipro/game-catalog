@@ -1478,9 +1478,6 @@ a { color: var(--accent); }
   .card-title-en { font-size: 12px; }
   .card-meta { padding-top: .2rem; font-size: 12px; align-items: center; }
   .card-price { font-size: 14px; }
-  .card-tags { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .15rem; }
-  .card-tags .badge { font-size: 11px; padding: .05rem .35rem; background: var(--bg-soft) !important; }
-  .card-tags .badge-upcoming { background: var(--dot) !important; }
 
   .modal-backdrop { padding: 0; align-items: flex-end; }
   .modal { width: 100%; max-height: 92vh; border-radius: 16px 16px 0 0; transform: translateY(40px); }
@@ -1490,4 +1487,52 @@ a { color: var(--accent); }
   .modal-content { padding: 1rem; }
   .modal-content h2 { font-size: 1.2rem; padding-right: 2.5rem; }
 }
-@media (min-width: 641px) { .card-tags { display: none; } }
+
+
+/* ================================================================
+   Round 3 — 封面融入卡片 / 分组标记 / 版本切换
+   ================================================================ */
+.game-card { overflow: hidden; isolation: isolate; }
+.cover-wrap { position: relative; overflow: hidden; background: var(--bg-soft); border-radius: 0; margin: 0; padding: 0; }
+.cover-wrap .cover-bg, .modal-cover .cover-bg {
+  position: absolute; inset: -12%; width: 124%; height: 124%; max-width: none; max-height: none;
+  object-fit: cover; filter: blur(16px) saturate(1.05); opacity: .9; transform: scale(1.05); z-index: 0;
+}
+.cover-wrap img:not(.cover-bg), .modal-cover img:not(.cover-bg) { position: relative; z-index: 1; object-fit: contain; }
+.cover-wrap .cover-placeholder { position: relative; z-index: 1; width: 100%; height: 100%; }
+.modal-cover { position: relative; overflow: hidden; padding: 0 !important; display: flex; align-items: center; justify-content: center; }
+.modal-cover img:not(.cover-bg) { width: 100%; height: 100%; }
+
+.card-body { gap: .2rem; }
+.card-meta { margin-top: auto; padding-top: .4rem; align-items: baseline; }
+.card-date { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.card-price { font-size: .95rem; font-variant-numeric: tabular-nums; }
+.card-tags { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem; margin-top: .35rem; }
+.tag { display: inline-flex; align-items: center; gap: .15rem; font-size: 11px; line-height: 1; font-weight: 700; letter-spacing: .02em;
+  padding: .28rem .4rem; border-radius: 4px; background: var(--bg-soft); color: var(--text-muted); white-space: nowrap; }
+.tag-plat { color: var(--accent); background: var(--accent-soft); }
+.tag-special { color: var(--accent); background: transparent; box-shadow: inset 0 0 0 1px rgba(47,93,80,.25); }
+.tag-star { font-size: 10px; }
+.tag-count { background: transparent; color: var(--text-dim); font-weight: 500; padding-left: .1rem; }
+.tag-upcoming { background: var(--dot); color: #fff; }
+
+.version-switch { display: flex; flex-wrap: wrap; gap: .3rem; margin: 1rem 0 .8rem; padding: 3px; background: var(--bg-soft); border-radius: 10px; }
+.version-tab { display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: .1rem; min-height: 40px;
+  padding: .35rem .7rem; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; position: relative; text-align: left; }
+.version-tab .vt-plat { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--accent); }
+.version-tab .vt-ed { font-size: 13px; font-weight: 600; max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.version-tab .vt-dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--dot); }
+.version-tab:hover { color: var(--text); }
+.version-tab.active { background: var(--bg-elev); color: var(--text); box-shadow: var(--shadow); }
+
+@media (max-width: 640px) {
+  .game-card { min-height: 92px; }
+  .cover-wrap { width: 68px; min-height: 92px; align-self: stretch; }
+  .card-meta { padding-top: .15rem; }
+  .card-tags { margin-top: .2rem; gap: .25rem; }
+  .tag { font-size: 11px; padding: .22rem .35rem; }
+  .version-switch { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .version-tab { flex: none; }
+  .modal-cover { height: 34vh; aspect-ratio: auto; width: 100%; max-width: none; margin: 0; border-radius: 0; }
+  .modal-cover img:not(.cover-bg) { max-height: 34vh; }
+}

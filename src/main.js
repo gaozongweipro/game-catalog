@@ -1,5 +1,6 @@
 import './style.css'
 
+import { buildGroups } from './grouping.js'
 const LANG_KEY = 'game-catalog-lang'
 const TAB_KEY = 'game-catalog-tab'
 
@@ -57,7 +58,7 @@ const I18N = {
     heroBadge: '实体 · 目录 · 2023–2026',
     heroTitle: '实体游戏目录',
     heroSub: 'PS 光盘 / Switch 卡带 · 近三年 · 按发售时间',
-    statTotal: (n) => `共 <strong>${n}</strong> 条`,
+    statTotal: (n, v) => `<strong>${n}</strong> 款游戏 · ${v} 个版本`,
     statPs: (n) => `PS <strong>${n}</strong>`,
     statNs: (n) => `Switch <strong>${n}</strong>`,
     statNs2: (n) => `Switch 2 <strong>${n}</strong>`,
@@ -69,6 +70,10 @@ const I18N = {
     hasPrice: '有价格',
     upcomingOnly: '即将发售',
     upcomingBadge: '即将发售',
+    priceFrom: ' 起',
+    specialCount: (n) => `${n} 个特别版`,
+    versionCount: (n) => `${n} 个版本`,
+    versionsTitle: '版本',
     upcomingReleaseDay: (d) => `发售日 ${d}`,
     statUpcoming: (n) => `即将发售 <strong>${n}</strong>`,
     tabMonth: '本月',
@@ -142,7 +147,7 @@ const I18N = {
     heroBadge: 'PHYSICAL · CATALOG · 2023–2026',
     heroTitle: 'Physical Game Catalog',
     heroSub: 'PS discs / Switch carts · last ~3 years · by release date',
-    statTotal: (n) => `<strong>${n}</strong> titles`,
+    statTotal: (n, v) => `<strong>${n}</strong> games · ${v} versions`,
     statPs: (n) => `PS <strong>${n}</strong>`,
     statNs: (n) => `Switch <strong>${n}</strong>`,
     statNs2: (n) => `Switch 2 <strong>${n}</strong>`,
@@ -154,6 +159,10 @@ const I18N = {
     hasPrice: 'Has price',
     upcomingOnly: 'Upcoming',
     upcomingBadge: 'Coming soon',
+    priceFrom: '+',
+    specialCount: (n) => `${n} special edition${n > 1 ? 's' : ''}`,
+    versionCount: (n) => `${n} versions`,
+    versionsTitle: 'Versions',
     upcomingReleaseDay: (d) => `Releases ${d}`,
     statUpcoming: (n) => `Upcoming <strong>${n}</strong>`,
     tabMonth: 'This month',
@@ -239,6 +248,8 @@ const PLATFORM_LABEL = {
 
 /** @type {Array<any>} */
 let allGames = []
+let allGroups = []
+const groupOf = new Map()
 
 const state = {
   lang: loadLang(),
@@ -463,7 +474,7 @@ function coverHtml(game, opts = {}) {
     ? ` sizes="(min-width: 700px) 360px, 90vw"`
     : ` sizes="(min-width: 640px) 180px, 40vw"`
 
-  return `<img src="${escapeHtml(src)}"${srcsetAttr}${sizesAttr} alt="${escapeHtml(primary)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-fallback-platform="${escapeHtml(game.platform || '')}" data-fallback-media="${escapeHtml(game.media || '')}" />`
+  return `<img src="${escapeHtml(src)}"${srcsetAttr}${sizesAttr} alt="${escapeHtml(primary)}" loading="${large ? 'eager' : 'lazy'}" decoding="async" referrerpolicy="no-referrer" data-fallback-platform="${escapeHtml(game.platform || '')}" data-fallback-media="${escapeHtml(game.media || '')}" />`
 }
 
 function bindCoverFallbacks(root) {
@@ -537,9 +548,9 @@ function pickMonthForYear(year) {
   return months[months.length - 1]
 }
 
-function filterGames() {
+function versionMatches(g) {
   const q = state.q.trim().toLowerCase()
-  let list = allGames.filter((g) => {
+  {
     if (state.tab === 'month') {
       if (!(g.release_date || '').startsWith(state.monthKey)) return false
     } else if (state.tab === 'upcoming') {
@@ -549,15 +560,32 @@ function filterGames() {
     if (state.edition && g.edition !== state.edition) return false
     if (state.hasPrice && !hasDisplayPrice(g)) return false
     if (q) {
-      const hay = `${g.title_cn} ${g.title_en} ${g.edition_name} ${g.edition_notes}`.toLowerCase()
+      const grp = groupOf.get(g.id)
+      const titles = grp ? grp.versions.map((v) => `${v.title_cn || ''} ${v.title_en || ''}`).join(' ') : `${g.title_cn} ${g.title_en}`
+      const hay = `${titles} ${g.edition_name} ${g.edition_notes}`.toLowerCase()
       if (!hay.includes(q)) return false
     }
     return true
-  })
-  if (state.tab === 'upcoming') {
-    list = [...list].sort((a, b) => String(a.release_date || '').localeCompare(String(b.release_date || '')))
   }
-  return list
+}
+
+/** One card per game group; a group matches when any of its versions matches. */
+function filterGames() {
+  const q = state.q.trim().toLowerCase()
+  const cards = []
+  for (const group of allGroups) {
+    const matched = group.versions.filter(versionMatches)
+    if (!matched.length) continue
+    // search also matches any title in the group
+    const dates = matched.map((v) => v.release_date || '').filter(Boolean).sort()
+    cards.push({ group, matched, id: group.id, release_date: dates[0] || '' })
+  }
+  if (state.tab === 'upcoming') {
+    cards.sort((a, b) => String(a.release_date).localeCompare(String(b.release_date)))
+  } else {
+    cards.sort((a, b) => String(b.release_date).localeCompare(String(a.release_date)))
+  }
+  return cards
 }
 
 function hasActiveFilters() {
@@ -578,46 +606,50 @@ function groupByYearMonth(games) {
   return years
 }
 
-function cardHtml(g) {
+const PLATFORM_SHORT = { PS5: 'PS5', PS4: 'PS4', NS: 'Switch', NS2: 'Switch 2' }
+
+function groupCover(group) {
+  return group.versions.find((v) => v.edition === 'standard' && (v.cover_url || v.cover_url_large)) ||
+    group.versions.find((v) => v.cover_url || v.cover_url_large) || group.versions[0]
+}
+
+function blurredCoverHtml(game, opts) {
+  const src = nonEmpty(game.cover_url) || nonEmpty(game.cover_url_large)
+  const bg = src ? `<img class="cover-bg" src="${escapeHtml(src)}" alt="" aria-hidden="true" loading="${opts && opts.large ? 'eager' : 'lazy'}" decoding="async" referrerpolicy="no-referrer" />` : ''
+  return bg + coverHtml(game, opts)
+}
+
+function cardHtml(card) {
   const i = t()
-  const price = formatPrice(g)
-  const edLabel = editionLabel(g.edition, g.edition_name)
-  const titles = displayTitles(g)
-  const upcoming = isUpcoming(g)
-  const secondary = titles.secondary
-    ? `<p class="card-title-en">${escapeHtml(titles.secondary)}</p>`
-    : ''
-  const upcomingBadge = upcoming
-    ? `<span class="badge badge-upcoming">${escapeHtml(i.upcomingBadge)}</span>`
-    : ''
-  const extrasHint =
-    isSpecialEdition(g) && hasEditionExtras(g)
-      ? `<span class="badge badge-extras" title="${escapeHtml(i.extrasHint)}">${escapeHtml(i.extrasHint)}</span>`
-      : ''
-  const dateLabel = upcoming && g.release_date
-    ? i.upcomingReleaseDay(g.release_date)
-    : g.release_date || '—'
-  return `<button type="button" class="game-card${upcoming ? ' is-upcoming' : ''}" data-id="${escapeHtml(g.id)}" aria-label="${escapeHtml(titles.primary)}">
-    <div class="cover-wrap">
-      ${coverHtml(g)}
-      <div class="badge-row">
-        ${upcomingBadge}
-        <span class="${platformBadgeClass(g.platform)}">${escapeHtml(PLATFORM_LABEL[g.platform] || g.platform)}</span>
-        <span class="${editionBadgeClass(g.edition)}">${escapeHtml(edLabel)}</span>
-        ${extrasHint}
-      </div>
-    </div>
+  const { group, matched } = card
+  const vs = group.versions
+  const cover = groupCover(group)
+  const titles = displayTitles(cover)
+  const upcoming = vs.some(isUpcoming)
+  const prices = vs.map(resolveCnyAmount).filter((n) => n != null && !Number.isNaN(n))
+  const minPrice = prices.length ? Math.min(...prices) : null
+  const multiPrice = new Set(prices).size > 1
+  const priceText = minPrice != null ? formatCny(minPrice) + (multiPrice ? i.priceFrom : '') : ''
+  const secondary = titles.secondary ? `<p class="card-title-en">${escapeHtml(titles.secondary)}</p>` : ''
+  const platforms = ['PS5', 'PS4', 'NS2', 'NS'].filter((p) => vs.some((v) => v.platform === p))
+  const specials = vs.filter(isSpecialEdition).length
+  const dateGame = matched.slice().sort((a, b) => String(a.release_date).localeCompare(String(b.release_date)))[0]
+  const dateUpcoming = isUpcoming(dateGame)
+  const dateLabel = dateUpcoming && dateGame.release_date ? i.upcomingReleaseDay(dateGame.release_date) : dateGame.release_date || '—'
+  const tags = `${upcoming ? `<span class="tag tag-upcoming">${escapeHtml(i.upcomingBadge)}</span>` : ''}
+        ${platforms.map((p) => `<span class="tag tag-plat plat-${p.toLowerCase()}">${escapeHtml(PLATFORM_SHORT[p])}</span>`).join('')}
+        ${specials ? `<span class="tag tag-special" title="${escapeHtml(i.specialCount(specials))}"><span class="tag-star" aria-hidden="true">✦</span>${specials}</span>` : ''}
+        ${vs.length > 1 ? `<span class="tag tag-count">${escapeHtml(i.versionCount(vs.length))}</span>` : ''}`
+  return `<button type="button" class="game-card${upcoming ? ' is-upcoming' : ''}" data-id="${escapeHtml(group.id)}" data-vid="${escapeHtml(cover.id)}" aria-label="${escapeHtml(titles.primary)}">
+    <div class="cover-wrap">${blurredCoverHtml(cover)}</div>
     <div class="card-body">
       <h3 class="card-title">${escapeHtml(titles.primary)}</h3>
       ${secondary}
-      <div class="card-tags">${upcomingBadge}<span class="badge">${escapeHtml(PLATFORM_LABEL[g.platform] || g.platform)}</span><span class="badge">${escapeHtml(edLabel)}</span></div>
       <div class="card-meta">
-        <span class="${upcoming ? 'card-date-upcoming' : ''}">${escapeHtml(dateLabel)}</span>
-        <div class="card-meta-right">
-          ${cardScoreHint(g)}
-          <span class="card-price ${price ? '' : 'empty'}">${price ? escapeHtml(price) : escapeHtml(i.priceTbd)}</span>
-        </div>
+        <span class="card-date ${dateUpcoming ? 'card-date-upcoming' : ''}">${escapeHtml(dateLabel)}</span>
+        <span class="card-price ${priceText ? '' : 'empty'}">${priceText ? escapeHtml(priceText) : escapeHtml(i.priceTbd)}</span>
       </div>
+      <div class="card-tags">${tags}</div>
     </div>
   </button>`
 }
@@ -792,6 +824,18 @@ function cardScoreHint(game) {
 
 function openModal(game) {
   const i = t()
+  const group = groupOf.get(game.id) || { versions: [game] }
+  const vs = group.versions
+  document.getElementById('modal-backdrop').dataset.openId = game.id
+  const scoreKey = (v) => JSON.stringify(getScores(v).map((x) => [x.source, x.score, x.score_text]))
+  const sharedScores = vs.every((v) => scoreKey(v) === scoreKey(vs[0]))
+  const synSrc = vs.find((v) => nonEmpty(v.summary_cn) || nonEmpty(v.summary_en)) || game
+  const switcher = vs.length > 1
+    ? `<div class="version-switch" role="tablist" aria-label="${escapeHtml(i.versionsTitle)}">${vs.map((v) => {
+        const on = v.id === game.id
+        return `<button type="button" role="tab" class="version-tab${on ? ' active' : ''}" aria-selected="${on}" data-version="${escapeHtml(v.id)}"><span class="vt-plat">${escapeHtml(PLATFORM_SHORT[v.platform] || v.platform)}</span><span class="vt-ed">${escapeHtml(v.edition_name && v.edition !== 'standard' ? v.edition_name : editionLabel(v.edition, v.edition_name))}</span>${isUpcoming(v) ? '<span class="vt-dot" aria-hidden="true"></span>' : ''}</button>`
+      }).join('')}</div>`
+    : ''
   const backdrop = document.getElementById('modal-backdrop')
   const price = formatPrice(game)
   const edLabel = editionLabel(game.edition, game.edition_name)
@@ -825,19 +869,22 @@ function openModal(game) {
 
   document.getElementById('modal-body').innerHTML = `
     <div class="modal-inner">
-      <div class="modal-cover">${coverHtml(game, { large: true })}</div>
+      <div class="modal-cover">${blurredCoverHtml(game, { large: true })}</div>
       <div class="modal-content">
         <button type="button" class="modal-close" id="modal-close" aria-label="${escapeHtml(i.close)}">✕</button>
+
+        <h2>${escapeHtml(titles.primary)}</h2>
+        ${secondary}
+        ${sharedScores ? scoresRowHtml(game) : ''}
+        ${synopsisHtml(synSrc)}
+        ${switcher}
         <div class="modal-badges">
           ${isUpcoming(game) ? `<span class="badge badge-upcoming">${escapeHtml(i.upcomingBadge)}</span>` : ''}
           <span class="${platformBadgeClass(game.platform)}">${escapeHtml(PLATFORM_LABEL[game.platform] || game.platform)}</span>
           <span class="${editionBadgeClass(game.edition)}">${escapeHtml(edLabel)}${game.edition_name ? ` · ${escapeHtml(game.edition_name)}` : ''}</span>
           <span class="badge badge-edition standard">${escapeHtml(mediaLabel(game.media))}</span>
         </div>
-        <h2>${escapeHtml(titles.primary)}</h2>
-        ${secondary}
-        ${scoresRowHtml(game)}
-        ${synopsisHtml(game)}
+        ${sharedScores ? '' : scoresRowHtml(game)}
         <dl class="detail-grid">
           <dt>${escapeHtml(i.releaseDate)}</dt><dd class="${isUpcoming(game) ? 'detail-upcoming-date' : ''}">${escapeHtml(isUpcoming(game) && game.release_date ? i.upcomingReleaseDay(game.release_date) : (game.release_date || '—'))}</dd>
           <dt>${escapeHtml(i.platform)}</dt><dd>${escapeHtml(PLATFORM_LABEL[game.platform] || game.platform)}</dd>
@@ -1039,7 +1086,7 @@ function refreshChrome() {
   if (stats && state.stats) {
     const s = state.stats
     stats.innerHTML = `
-      <span>${i.statTotal(s.total)}</span>
+      <span>${i.statTotal(s.total, s.versions)}</span>
       <span>${i.statPs(s.ps)}</span>
       <span>${i.statNs(s.ns)}</span>
       <span>${i.statNs2(s.ns2)}</span>
@@ -1131,7 +1178,7 @@ function mountShell(stats) {
       <h1 id="hero-title">${escapeHtml(i.heroTitle)}</h1>
       <p class="hero-sub" id="hero-sub">${escapeHtml(i.heroSub)}</p>
       <div class="hero-stats" id="hero-stats">
-        <span>${i.statTotal(stats.total)}</span>
+        <span>${i.statTotal(stats.total, stats.versions)}</span>
         <span>${i.statPs(stats.ps)}</span>
         <span>${i.statNs(stats.ns)}</span>
         <span>${i.statNs2(stats.ns2)}</span>
@@ -1288,15 +1335,18 @@ function mountShell(stats) {
   document.getElementById('catalog').addEventListener('click', (e) => {
     const card = e.target.closest('.game-card')
     if (!card) return
-    const game = allGames.find((g) => g.id === card.dataset.id)
-    if (game) {
-      document.getElementById('modal-backdrop').dataset.openId = game.id
-      openModal(game)
-    }
+    const game = allGames.find((g) => g.id === card.dataset.vid)
+    if (game) openModal(game)
   })
 
   const backdrop = document.getElementById('modal-backdrop')
   backdrop.addEventListener('click', (e) => {
+    const vt = e.target.closest('[data-version]')
+    if (vt) {
+      const v = allGames.find((g) => g.id === vt.dataset.version)
+      if (v) { openModal(v); document.querySelector(`[data-version="${CSS.escape(v.id)}"]`)?.focus() }
+      return
+    }
     if (e.target === backdrop || e.target.id === 'modal-close' || e.target.closest('#modal-close')) {
       closeModal()
     }
@@ -1314,9 +1364,12 @@ async function boot() {
     allGames = await res.json()
     if (!Array.isArray(allGames)) throw new Error('games.json must be an array')
     allGames.sort((a, b) => String(b.release_date).localeCompare(String(a.release_date)))
+    allGroups = buildGroups(allGames)
+    for (const grp of allGroups) for (const v of grp.versions) groupOf.set(v.id, grp)
 
     const stats = {
-      total: allGames.length,
+      total: allGroups.length,
+      versions: allGames.length,
       ps: allGames.filter((g) => g.platform === 'PS5' || g.platform === 'PS4').length,
       ns: allGames.filter((g) => g.platform === 'NS').length,
       ns2: allGames.filter((g) => g.platform === 'NS2').length,
