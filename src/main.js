@@ -610,6 +610,7 @@ function cardHtml(g) {
     <div class="card-body">
       <h3 class="card-title">${escapeHtml(titles.primary)}</h3>
       ${secondary}
+      <div class="card-tags">${upcomingBadge}<span class="badge">${escapeHtml(PLATFORM_LABEL[g.platform] || g.platform)}</span><span class="badge">${escapeHtml(edLabel)}</span></div>
       <div class="card-meta">
         <span class="${upcoming ? 'card-date-upcoming' : ''}">${escapeHtml(dateLabel)}</span>
         <div class="card-meta-right">
