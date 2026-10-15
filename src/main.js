@@ -120,6 +120,9 @@ const I18N = {
     titleCnSource: '中文名来源',
     aboutTitle: '简介',
     aboutEmpty: '暂无简介',
+    cartType: '卡带类型',
+    cartFull: '完整卡带',
+    cartKey: '钥匙卡',
     scoresTitle: '媒体评分',
     footerDisclaimer:
       '<strong>免责声明</strong>：本站为库存浏览 / 展示用静态目录。建议零售价仅供参考，非实时售价，亦非购买承诺。',
@@ -215,6 +218,9 @@ const I18N = {
     titleCnSource: 'CN title source',
     aboutTitle: 'About',
     aboutEmpty: 'No synopsis yet',
+    cartType: 'Cartridge type',
+    cartFull: 'Full cartridge',
+    cartKey: 'Game-Key Card',
     scoresTitle: 'Critic scores',
     footerDisclaimer:
       '<strong>Disclaimer</strong>: Static browse/showcase catalog. MSRP is for reference only — not a live price or purchase offer.',
@@ -636,8 +642,17 @@ function cardHtml(card) {
   const dateGame = matched.slice().sort((a, b) => String(a.release_date).localeCompare(String(b.release_date)))[0]
   const dateUpcoming = isUpcoming(dateGame)
   const dateLabel = dateUpcoming && dateGame.release_date ? i.upcomingReleaseDay(dateGame.release_date) : dateGame.release_date || '—'
+  const ns2Vers = vs.filter((v) => v.platform === 'NS2')
+  const hasKey = ns2Vers.some((v) => v.ns2_cart_type === 'key_card')
+  const hasFull = ns2Vers.some((v) => v.ns2_cart_type === 'full')
+  let cartTags = ''
+  if (hasKey) cartTags += `<span class="tag tag-cart tag-cart-key">${escapeHtml(state.lang === 'zh' ? '钥匙卡' : 'Game-Key Card')}</span>`
+  if (hasFull && !hasKey) cartTags += `<span class="tag tag-cart tag-cart-full">${escapeHtml(state.lang === 'zh' ? '完整卡带' : 'Full cart')}</span>`
+  // if both full and key versions exist in group, show both
+  if (hasKey && hasFull) cartTags = `<span class="tag tag-cart tag-cart-full">${escapeHtml(state.lang === 'zh' ? '完整卡带' : 'Full cart')}</span>` + cartTags
   const tags = `${upcoming ? `<span class="tag tag-upcoming">${escapeHtml(i.upcomingBadge)}</span>` : ''}
         ${platforms.map((p) => `<span class="tag tag-plat plat-${p.toLowerCase()}">${escapeHtml(PLATFORM_SHORT[p])}</span>`).join('')}
+        ${cartTags}
         ${specials ? `<span class="tag tag-special" title="${escapeHtml(i.specialCount(specials))}"><span class="tag-star" aria-hidden="true">✦</span>${specials}</span>` : ''}
         ${vs.length > 1 ? `<span class="tag tag-count">${escapeHtml(i.versionCount(vs.length))}</span>` : ''}`
   return `<button type="button" class="game-card${upcoming ? ' is-upcoming' : ''}" data-id="${escapeHtml(group.id)}" data-vid="${escapeHtml(cover.id)}" aria-label="${escapeHtml(titles.primary)}">
@@ -729,10 +744,26 @@ function getScores(game) {
  * Empty → caller shows 「暂无简介」 / aboutEmpty.
  */
 function pickSynopsis(game) {
-  const cn = nonEmpty(game?.summary_cn)
+  const zh = nonEmpty(game?.synopsis_zh) || nonEmpty(game?.summary_cn)
   const en = nonEmpty(game?.summary_en)
-  if (state.lang === 'zh') return cn || en || ''
-  return en || cn || ''
+  if (state.lang === 'zh') return zh || en || ''
+  return en || zh || ''
+}
+
+function ns2CartLabel(game) {
+  if (!game || game.platform !== 'NS2') return ''
+  const t = game.ns2_cart_type
+  if (t === 'full') return state.lang === 'zh' ? '完整卡带' : 'Full cartridge'
+  if (t === 'key_card') return state.lang === 'zh' ? '钥匙卡' : 'Game-Key Card'
+  return ''
+}
+
+function ns2CartBadgeHtml(game, { compact } = {}) {
+  const label = ns2CartLabel(game)
+  if (!label) return ''
+  const kind = game.ns2_cart_type === 'key_card' ? 'key' : 'full'
+  const cls = compact ? `tag tag-cart tag-cart-${kind}` : `badge badge-cart badge-cart-${kind}`
+  return `<span class="${cls}">${escapeHtml(label)}</span>`
 }
 
 /**
@@ -829,11 +860,12 @@ function openModal(game) {
   document.getElementById('modal-backdrop').dataset.openId = game.id
   const scoreKey = (v) => JSON.stringify(getScores(v).map((x) => [x.source, x.score, x.score_text]))
   const sharedScores = vs.every((v) => scoreKey(v) === scoreKey(vs[0]))
-  const synSrc = vs.find((v) => nonEmpty(v.summary_cn) || nonEmpty(v.summary_en)) || game
+  const synSrc = vs.find((v) => nonEmpty(v.synopsis_zh) || nonEmpty(v.summary_cn) || nonEmpty(v.summary_en)) || game
   const switcher = vs.length > 1
     ? `<div class="version-switch" role="tablist" aria-label="${escapeHtml(i.versionsTitle)}">${vs.map((v) => {
         const on = v.id === game.id
-        return `<button type="button" role="tab" class="version-tab${on ? ' active' : ''}" aria-selected="${on}" data-version="${escapeHtml(v.id)}"><span class="vt-plat">${escapeHtml(PLATFORM_SHORT[v.platform] || v.platform)}</span><span class="vt-ed">${escapeHtml(v.edition_name && v.edition !== 'standard' ? v.edition_name : editionLabel(v.edition, v.edition_name))}</span>${isUpcoming(v) ? '<span class="vt-dot" aria-hidden="true"></span>' : ''}</button>`
+        const cart = ns2CartLabel(v)
+        return `<button type="button" role="tab" class="version-tab${on ? ' active' : ''}" aria-selected="${on}" data-version="${escapeHtml(v.id)}"><span class="vt-plat">${escapeHtml(PLATFORM_SHORT[v.platform] || v.platform)}</span><span class="vt-ed">${escapeHtml(v.edition_name && v.edition !== 'standard' ? v.edition_name : editionLabel(v.edition, v.edition_name))}</span>${cart ? `<span class="vt-cart vt-cart-${v.ns2_cart_type === 'key_card' ? 'key' : 'full'}">${escapeHtml(cart)}</span>` : ''}${isUpcoming(v) ? '<span class="vt-dot" aria-hidden="true"></span>' : ''}</button>`
       }).join('')}</div>`
     : ''
   const backdrop = document.getElementById('modal-backdrop')
@@ -881,6 +913,7 @@ function openModal(game) {
         <div class="modal-badges">
           ${isUpcoming(game) ? `<span class="badge badge-upcoming">${escapeHtml(i.upcomingBadge)}</span>` : ''}
           <span class="${platformBadgeClass(game.platform)}">${escapeHtml(PLATFORM_LABEL[game.platform] || game.platform)}</span>
+          ${ns2CartBadgeHtml(game)}
           <span class="${editionBadgeClass(game.edition)}">${escapeHtml(edLabel)}${game.edition_name ? ` · ${escapeHtml(game.edition_name)}` : ''}</span>
           <span class="badge badge-edition standard">${escapeHtml(mediaLabel(game.media))}</span>
         </div>
@@ -888,6 +921,7 @@ function openModal(game) {
         <dl class="detail-grid">
           <dt>${escapeHtml(i.releaseDate)}</dt><dd class="${isUpcoming(game) ? 'detail-upcoming-date' : ''}">${escapeHtml(isUpcoming(game) && game.release_date ? i.upcomingReleaseDay(game.release_date) : (game.release_date || '—'))}</dd>
           <dt>${escapeHtml(i.platform)}</dt><dd>${escapeHtml(PLATFORM_LABEL[game.platform] || game.platform)}</dd>
+          ${ns2CartLabel(game) ? `<dt>${escapeHtml(i.cartType)}</dt><dd>${escapeHtml(ns2CartLabel(game))}</dd>` : ''}
           <dt>${escapeHtml(i.labelMedia)}</dt><dd>${escapeHtml(mediaLabel(game.media) || '—')}</dd>
           <dt>${escapeHtml(i.labelEdition)}</dt><dd>${escapeHtml(game.edition_name || edLabel)}（${escapeHtml(game.edition || '—')}）</dd>
           <dt>${escapeHtml(i.msrp)}</dt><dd>${price ? escapeHtml(price) : escapeHtml(i.priceMissing)}</dd>

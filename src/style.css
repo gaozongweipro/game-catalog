@@ -1536,3 +1536,31 @@ a { color: var(--accent); }
   .modal-cover { height: 34vh; aspect-ratio: auto; width: 100%; max-width: none; margin: 0; border-radius: 0; }
   .modal-cover img:not(.cover-bg) { max-height: 34vh; }
 }
+
+/* NS2 cartridge type — soft chips, no heavy outline */
+.tag-cart,
+.badge-cart {
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.tag-cart-full,
+.badge-cart-full {
+  color: #1a7a5c;
+  background: rgba(46, 184, 138, 0.16);
+}
+.tag-cart-key,
+.badge-cart-key {
+  color: #9a5b12;
+  background: rgba(245, 166, 35, 0.18);
+}
+.vt-cart {
+  display: inline-block;
+  margin-left: .25rem;
+  padding: .08rem .35rem;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.vt-cart-full { color: #1a7a5c; background: rgba(46, 184, 138, 0.16); }
+.vt-cart-key { color: #9a5b12; background: rgba(245, 166, 35, 0.18); }
