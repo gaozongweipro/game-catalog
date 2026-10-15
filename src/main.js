@@ -1196,7 +1196,8 @@ function refreshChrome() {
       <p>${i.footerDisclaimer}</p>
       <p>${i.footerCovers}</p>
       <p class="footer-fx">${escapeHtml(i.footerFx)}</p>
-      <p>${i.footerData}</p>`
+      <p>${i.footerData}</p>
+      <p><a class="footer-demo" href="${import.meta.env.BASE_URL}box-demo.html">${state.lang === 'en' ? '3D case demo' : '3D 盒演示'}</a></p>`
   }
 
   syncLangToggle()

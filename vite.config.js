@@ -1,13 +1,16 @@
 import { defineConfig } from 'vite'
+import { resolve } from 'path'
 
 export default defineConfig({
   base: process.env.PAGES_BASE || '/',
-  preview: {
-    host: true,
-    allowedHosts: true,
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        boxDemo: resolve(__dirname, 'box-demo.html'),
+      },
+    },
   },
-  server: {
-    host: true,
-    allowedHosts: true,
-  },
+  preview: { host: true, allowedHosts: true },
+  server: { host: true, allowedHosts: true },
 })

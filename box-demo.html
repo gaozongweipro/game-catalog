@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>PS5 游戏盒 3D 演示 · 3D Case Demo</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body>
+<canvas id="c"></canvas>
+<header class="top">
+  <a id="back" href="./">← 返回目录</a>
+  <button id="lang">EN</button>
+</header>
+<div class="title"><h1 id="h1">PS5 游戏盒</h1><p id="sub">羊蹄之魂 · 可拖动旋转查看</p></div>
+<div class="panel">
+  <button id="bOpen">打开盒子</button>
+  <button id="bDisc" disabled>取出光盘</button>
+  <button id="bReset">复位视角</button>
+</div>
+<p class="hint" id="hint">拖动旋转 · 双指缩放 · 点击盒盖或光盘交互</p>
+<script type="module" src="/src/demo/box.js"></script>
+</body>
+</html>
