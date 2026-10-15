@@ -941,6 +941,33 @@ function openModal(game) {
   document.getElementById('modal-close').focus()
 }
 
+const ROUTE_PREFIX = '#/game/'
+function routeId() {
+  const h = location.hash
+  return h.startsWith(ROUTE_PREFIX) ? decodeURIComponent(h.slice(ROUTE_PREFIX.length)) : null
+}
+function listUrl() { return location.pathname + location.search }
+function navigateToGame(game, { replace = false } = {}) {
+  const url = listUrl() + ROUTE_PREFIX + encodeURIComponent(game.id)
+  if (replace || routeId()) history.replaceState({ detail: true, fromList: history.state?.fromList ?? false }, '', url)
+  else history.pushState({ detail: true, fromList: true }, '', url)
+  openModal(game)
+}
+function requestClose() {
+  if (!routeId()) { closeModal(); return }
+  if (history.state?.fromList) history.back()
+  else { history.replaceState(null, '', listUrl()); closeModal() }
+}
+function syncRoute() {
+  const id = routeId()
+  const game = id && allGames.find((g) => g.id === id)
+  if (game) openModal(game)
+  else {
+    if (id) history.replaceState(null, '', listUrl())
+    closeModal()
+  }
+}
+
 function closeModal() {
   const backdrop = document.getElementById('modal-backdrop')
   if (!backdrop) return
@@ -1370,7 +1397,7 @@ function mountShell(stats) {
     const card = e.target.closest('.game-card')
     if (!card) return
     const game = allGames.find((g) => g.id === card.dataset.vid)
-    if (game) openModal(game)
+    if (game) navigateToGame(game)
   })
 
   const backdrop = document.getElementById('modal-backdrop')
@@ -1378,16 +1405,18 @@ function mountShell(stats) {
     const vt = e.target.closest('[data-version]')
     if (vt) {
       const v = allGames.find((g) => g.id === vt.dataset.version)
-      if (v) { openModal(v); document.querySelector(`[data-version="${CSS.escape(v.id)}"]`)?.focus() }
+      if (v) { navigateToGame(v, { replace: true }); document.querySelector(`[data-version="${CSS.escape(v.id)}"]`)?.focus() }
       return
     }
     if (e.target === backdrop || e.target.id === 'modal-close' || e.target.closest('#modal-close')) {
-      closeModal()
+      requestClose()
     }
   })
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeModal()
+    if (e.key === 'Escape' && document.getElementById('modal-backdrop')?.classList.contains('open')) requestClose()
   })
+  window.addEventListener('popstate', syncRoute)
+  window.addEventListener('hashchange', () => { if (routeId() || document.getElementById('modal-backdrop')?.classList.contains('open')) syncRoute() })
 }
 
 async function boot() {
@@ -1412,6 +1441,7 @@ async function boot() {
     }
     mountShell(stats)
     applyAndRender()
+    if (routeId()) syncRoute()
   } catch (err) {
     document.getElementById('app').innerHTML = `<div class="state-panel error">${escapeHtml(t().loadError(err.message))}</div>`
   }
