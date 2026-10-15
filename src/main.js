@@ -1419,7 +1419,34 @@ function mountShell(stats) {
   window.addEventListener('hashchange', () => { if (routeId() || document.getElementById('modal-backdrop')?.classList.contains('open')) syncRoute() })
 }
 
+import SPLASH_COVERS from './splash-covers.json'
+
+function showSplash() {
+  if (sessionStorage.getItem('splash-seen')) return null
+  try { sessionStorage.setItem('splash-seen', '1') } catch {}
+  const el = document.createElement('div')
+  el.id = 'splash'
+  el.setAttribute('aria-hidden', 'true')
+  const tiles = SPLASH_COVERS.map((u, n) => `<div class="splash-tile" style="--d:${(n % 8) * 60}ms"><img src="${escapeHtml(u)}" alt="" loading="eager" decoding="async" referrerpolicy="no-referrer" onload="this.parentNode.classList.add('in')" onerror="this.remove()"></div>`).join('')
+  el.innerHTML = `<div class="splash-wall">${tiles}</div><div class="splash-veil"></div><div class="splash-title"><h1>${escapeHtml(t().heroTitle)}</h1><p>PS5 · Switch · Switch 2</p></div>`
+  document.body.appendChild(el)
+  document.body.classList.add('splashing')
+  return { el, start: performance.now() }
+}
+
+async function hideSplash(sp, { immediate = false } = {}) {
+  if (!sp) return
+  const wait = immediate ? 0 : Math.max(0, 600 - (performance.now() - sp.start))
+  if (wait) await new Promise((r) => setTimeout(r, wait))
+  sp.el.classList.add('out')
+  document.body.classList.remove('splashing')
+  document.getElementById('app')?.classList.add('reveal')
+  setTimeout(() => sp.el.remove(), 600)
+}
+
 async function boot() {
+  const sp = showSplash()
+  const maxTimer = sp ? setTimeout(() => hideSplash(sp, { immediate: true }), 1500) : null
   document.getElementById('app').innerHTML = `<div class="state-panel">${escapeHtml(t().loading)}</div>`
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}data/games.json`)
@@ -1441,8 +1468,12 @@ async function boot() {
     }
     mountShell(stats)
     applyAndRender()
-    if (routeId()) syncRoute()
+    clearTimeout(maxTimer)
+    if (routeId()) { await hideSplash(sp, { immediate: true }); syncRoute() }
+    else await hideSplash(sp)
   } catch (err) {
+    clearTimeout(maxTimer)
+    hideSplash(sp, { immediate: true })
     document.getElementById('app').innerHTML = `<div class="state-panel error">${escapeHtml(t().loadError(err.message))}</div>`
   }
 }

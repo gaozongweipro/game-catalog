@@ -3,6 +3,7 @@ set -euo pipefail
 REPO=gaozongweipro/game-catalog
 cd /workspace/game-catalog-site
 cp /workspace/game-catalog/games.json public/data/games.json
+python3 gen-splash.py
 PAGES_BASE=/game-catalog/ npx vite build --outDir /tmp/pages-dist --emptyOutDir
 touch /tmp/pages-dist/.nojekyll
 T=$(mktemp -d); cp -r /tmp/pages-dist/. "$T"; cd "$T"
