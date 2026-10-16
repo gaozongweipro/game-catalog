@@ -8,6 +8,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         boxDemo: resolve(__dirname, 'box-demo.html'),
+        showcase: resolve(__dirname, 'showcase.html'),
       },
     },
   },

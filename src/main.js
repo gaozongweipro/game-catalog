@@ -1197,7 +1197,7 @@ function refreshChrome() {
       <p>${i.footerCovers}</p>
       <p class="footer-fx">${escapeHtml(i.footerFx)}</p>
       <p>${i.footerData}</p>
-      <p><a class="footer-demo" href="${import.meta.env.BASE_URL}box-demo.html">${state.lang === 'en' ? '3D case demo' : '3D 盒演示'}</a></p>`
+      <p><a class="footer-demo" href="${import.meta.env.BASE_URL}box-demo.html">${state.lang === 'en' ? '3D case demo' : '3D 盒演示'}</a> · <a class="footer-demo" href="${import.meta.env.BASE_URL}showcase.html">${state.lang === 'en' ? '3D showcase' : '3D 陈列柜'}</a></p>`
   }
 
   syncLangToggle()
@@ -1228,6 +1228,7 @@ function mountShell(stats) {
     <div class="topbar">
       <div class="topbar-inner">
         <span class="topbar-brand">PHYSICAL CATALOG</span>
+        <a class="topbar-link" href="${import.meta.env.BASE_URL}showcase.html">${state.lang === 'en' ? '3D Showcase' : '3D 陈列柜'}</a>
         <div class="lang-toggle" id="lang-toggle" role="group" aria-label="Language">
           <button type="button" data-lang="zh" aria-pressed="${state.lang === 'zh'}">ZH</button>
           <button type="button" data-lang="en" aria-pressed="${state.lang === 'en'}">EN</button>

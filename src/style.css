@@ -1581,3 +1581,6 @@ body.splashing{overflow:hidden}
 #app.reveal{animation:appReveal .55s ease both}
 @keyframes appReveal{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){#splash,.splash-tile,#app.reveal,.splash-title{transition:none;animation:none}}
+
+.topbar-link{margin-left:auto;margin-right:12px;font-size:13px;color:#2f6f63;text-decoration:none;padding:6px 12px;border-radius:999px;background:rgba(47,111,99,.08);transition:background .2s}
+.topbar-link:hover{background:rgba(47,111,99,.16)}
