@@ -23,6 +23,12 @@
     <input type="file" id="importFile" accept=".json,application/json" hidden />
   </div>
 </header>
+<div class="shelfbar" id="shelfbar">
+  <input id="q" type="search" placeholder="搜索 / Search" autocomplete="off" />
+  <div class="seg" id="pf"><button data-p="all" aria-pressed="true">全部</button><button data-p="ps5" aria-pressed="false">PS5</button><button data-p="ns" aria-pressed="false">NS</button><button data-p="ns2" aria-pressed="false">NS2</button></div>
+  <select id="sort"><option value="custom">自定义顺序</option><option value="name">名称</option><option value="date">日期</option><option value="platform">平台</option></select>
+  <div class="pager hidden" id="pager"><button id="pgPrev" aria-label="prev">‹</button><span id="pgLbl">1 / 1</span><select id="pgJump" aria-label="jump"></select><button id="pgNext" aria-label="next">›</button></div>
+</div>
 <button class="fab" id="makeBtn"><span>＋</span><em id="makeT">制作</em></button>
 
 <div class="loading" id="loading"><div class="spin"></div><p id="loadT">正在布置展柜…</p></div>

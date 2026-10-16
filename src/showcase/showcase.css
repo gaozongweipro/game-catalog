@@ -86,3 +86,10 @@ button:disabled{opacity:.38;cursor:default}
 .sg-th{flex:0 0 40px;height:52px;border-radius:6px;background:#e8ecea;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .sg-th img{width:100%;height:100%;object-fit:cover}
 .sg-t{display:flex;flex-direction:column;min-width:0}.sg-t b{font-size:14px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sg-t i{font-style:normal;font-size:11.5px;color:var(--mut)}
+
+.shelfbar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:8px;align-items:center;z-index:5;background:var(--card);backdrop-filter:blur(12px);padding:6px 8px;border-radius:999px;box-shadow:0 4px 18px rgba(40,60,55,.1);max-width:calc(100vw - 120px);flex-wrap:wrap;justify-content:center}
+.shelfbar input,.shelfbar select{font:inherit;font-size:13px;border:0;background:#f1f4f2;border-radius:999px;padding:7px 12px;outline:none;color:var(--ink)}
+.shelfbar input{width:150px}
+.pager{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--ink)}.pager button{background:#f1f4f2;border-radius:999px;width:30px;height:30px;font-size:18px}.pager button:disabled{opacity:.35}.pager select{max-width:120px}
+body:not(.mode-shelf) .shelfbar{display:none}
+@media (max-width:700px){.shelfbar{bottom:84px;border-radius:18px;max-width:calc(100vw - 20px)}.shelfbar input{width:110px}}

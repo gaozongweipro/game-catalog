@@ -421,23 +421,60 @@ function discRing(r0, r1, mat, z, flip) {
 }
 let labelRing, shadowDisc
 if (!NSW) {
-discRing(0.23, R - 0.002, dataMat, 0, true)
-// Diffraction overlay: BD pits act like a circular grating → rainbow arcs whose hue shifts with view angle
+// ---- Data side (BD): purple-tinted mirror data area 23–58.5 mm, clear 1.5 mm outer rim, mirror band, clear stacking ring.
+dataMat.color.set(0x8c86a8); dataMat.roughness = 0.05; dataMat.iridescence = 0.35; dataMat.envMapIntensity = 1.15; dataMat.anisotropy = 0.6
+discRing(0.23, R - 0.015, dataMat, 0, true)
+discRing(R - 0.015, R - 0.001, clearMat, 0, true) // clear polycarbonate rim
+// Diffraction: the tracks are a circular grating (pitch ~0.32 µm). For each light, 1st-order wavelength
+// λ = d·|t·(L+V)| where t is the local tangential (track) direction; it is only visible when the half vector
+// lies in the radial plane. Lights are read from the scene every frame, so rainbows sweep with light, view and spin.
 const diffMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-  uniforms: { uStr: { value: 0.75 } },
-  vertexShader: `varying vec3 vP; varying vec3 vV; void main(){ vP = position; vec4 wp = modelMatrix*vec4(position,1.); vec3 camO = (inverse(modelMatrix)*vec4(cameraPosition,1.)).xyz; vV = normalize(camO-position); gl_Position = projectionMatrix*viewMatrix*wp; }`,
-  fragmentShader: `uniform float uStr; varying vec3 vP; varying vec3 vV;
-    vec3 hue(float h){ return clamp(abs(mod(h*6.+vec3(0.,4.,2.),6.)-3.)-1.,0.,1.); }
-    void main(){ float r = length(vP.xy); vec2 t = normalize(vec2(-vP.y, vP.x)); vec3 L = normalize(vec3(0.5,0.8,0.6));
-      vec3 H = normalize(vV + L); float g = dot(t, H.xy); float band = abs(g);
-      float h = fract(g*2.6 + r*1.4);
-      float a = pow(smoothstep(0.0,0.5,band),1.6) * (0.82+0.18*sin(r*55.)) * uStr * (1.-smoothstep(0.585,0.6,r));
-      gl_FragColor = vec4(hue(h)*a, a); }`,
+  uniforms: { uStr: { value: 1.0 }, uN: { value: 0 }, uL: { value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] }, uI: { value: [0, 0, 0, 0] }, uPitch: { value: 1.25 } },
+  vertexShader: `varying vec3 vWP; varying vec3 vT; varying vec3 vR; varying vec3 vN; varying vec2 vXY;
+    void main(){ vXY = position.xy; vec4 wp = modelMatrix*vec4(position,1.); vWP = wp.xyz;
+      vec3 rL = normalize(vec3(position.xy,0.)); vec3 tL = vec3(-rL.y, rL.x, 0.);
+      vR = normalize(mat3(modelMatrix)*rL); vT = normalize(mat3(modelMatrix)*tL); vN = normalize(mat3(modelMatrix)*vec3(0.,0.,-1.));
+      gl_Position = projectionMatrix*viewMatrix*wp; }`,
+  fragmentShader: `uniform float uStr; uniform int uN; uniform vec3 uL[4]; uniform float uI[4]; uniform float uPitch;
+    varying vec3 vWP; varying vec3 vT; varying vec3 vR; varying vec3 vN; varying vec2 vXY;
+    vec3 spec(float w){ // wavelength in µm → approx RGB
+      float r = smoothstep(0.50,0.60,w) - smoothstep(0.66,0.72,w)*0.6; float g = smoothstep(0.45,0.53,w) - smoothstep(0.56,0.63,w);
+      float b = smoothstep(0.38,0.44,w) - smoothstep(0.47,0.52,w); return clamp(vec3(r + smoothstep(0.38,0.41,w)*(1.-smoothstep(0.41,0.45,w))*0.4, g, b), 0., 1.); }
+    void main(){
+      float rad = length(vXY); if (rad < 0.235 || rad > 0.583) discard;
+      vec3 V = normalize(cameraPosition - vWP); vec3 N = gl_FrontFacing ? vN : -vN; if (dot(N,V) < 0.) N = -N;
+      vec3 col = vec3(0.);
+      for (int i = 0; i < 4; i++) { if (i >= uN) break;
+        vec3 L = normalize(uL[i] - vWP); if (dot(N,L) <= 0.) continue;
+        vec3 H = normalize(L + V); float off = dot(H, vR); float plane = exp(-off*off*900.);
+        for (int m = 1; m <= 2; m++) { float w = uPitch*abs(dot(vT, L + V))/float(m); col += spec(w) * plane * uI[i] * (m == 1 ? 1. : 0.45); }
+      }
+      float fade = smoothstep(0.235,0.25,rad)*(1.-smoothstep(0.57,0.583,rad));
+      gl_FragColor = vec4(col*uStr*fade, 1.); }`,
 })
-discRing(0.235, R - 0.004, diffMat, -0.0006, true)
+const _lp = new THREE.Vector3()
+const diffRing = discRing(0.235, R - 0.016, diffMat, -0.0006, true)
+diffRing.onBeforeRender = (r, scn) => { // collect up to 4 visible lights (world positions)
+  let n = 0
+  scn.traverseVisible((o) => { if (n >= 4 || !o.isLight || o.isAmbientLight || o.isHemisphereLight) return
+    o.getWorldPosition(_lp); if (o.isDirectionalLight) _lp.sub(o.target.getWorldPosition(new THREE.Vector3())).normalize().multiplyScalar(50).add(disc.getWorldPosition(new THREE.Vector3()))
+    diffMat.uniforms.uL.value[n].copy(_lp); diffMat.uniforms.uI.value[n] = Math.min(1.5, o.intensity * (o.isRectAreaLight ? 0.35 : 0.6)); n++ })
+  // plus a virtual "room" light above-behind the viewer so the rainbow is present under env lighting alone
+  if (n < 4) { _lp.copy(r.xr?.isPresenting ? _lp : _lp.set(0, 6, 3)); diffMat.uniforms.uL.value[n].copy(_lp); diffMat.uniforms.uI.value[n] = 0.5; n++ }
+  diffMat.uniforms.uN.value = n
+}
 discRing(0.17, 0.23, mirrorMat, 0, true)
 discRing(rH, 0.17, clearMat, 0, true)
+{ // moulded stacking-ring text (mould number / BD logo) on the clear inner ring
+  const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d'); g.translate(256, 256)
+  g.fillStyle = 'rgba(255,255,255,0.9)'; g.font = '600 15px Arial'; g.textAlign = 'center'
+  const txt = 'BD-ROM · 50GB · M1 · SONY DADC · 3-012 · ', r0 = 256 * (0.135 / 0.17)
+  for (let i = 0, a = -Math.PI / 2; i < txt.length * 2; i++) { const ch = txt[i % txt.length]; g.save(); g.rotate(a); g.translate(0, -r0); g.fillText(ch, 0, 0); g.restore(); a += 0.07; if (a > Math.PI * 1.45) break }
+  const tx = new THREE.CanvasTexture(c)
+  const m = mesh(new THREE.CircleGeometry(0.17, 64), new THREE.MeshPhysicalMaterial({ map: tx, alphaMap: tx, transparent: true, opacity: 0.35, roughness: 0.3, depthWrite: false, side: THREE.DoubleSide }), disc, false)
+  m.position.z = -0.0009; m.rotation.y = Math.PI
+}
 labelRing = discRing(0.17, R - 0.002, labelMat, DT, false)
 discRing(rH, 0.17, clearMat, DT, false)
 { const uv = labelRing.geometry.attributes.uv, p = labelRing.geometry.attributes.position; for (let i = 0; i < uv.count; i++) uv.setXY(i, p.getX(i) / (2 * R) + 0.5, p.getY(i) / (2 * R) + 0.5) }

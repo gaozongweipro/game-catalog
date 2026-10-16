@@ -2,6 +2,7 @@ import './showcase.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
 import { createCaseModel, platformSpec, W, H, D } from '../demo/caseModel.js'
 import { loadRE4 } from '../demo/art.js'
@@ -57,89 +58,170 @@ controls.enableDamping = true; controls.dampingFactor = 0.08; controls.screenSpa
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }
 let auto = true
 controls.addEventListener('start', () => { auto = false; dirty = 3 })
-controls.addEventListener('change', () => { dirty = 2 })
+controls.addEventListener('change', () => { dirty = 2; clampPan() })
+// Cabinet view is a framed shot, not a free orbit: ±15° azimuth, ±11° polar, short dolly range, pan clamped to the cabinet.
+let snapTimer = 0
+controls.addEventListener('end', () => { clearTimeout(snapTimer); if (mode === 'shelf') snapTimer = setTimeout(() => { if (mode === 'shelf') goCam(camShelfGoal()) }, 2600) })
+function applyLimits() {
+  if (mode === 'shelf') {
+    const g = camShelfGoal(), sph = new THREE.Spherical().setFromVector3(g.p.clone().sub(g.t)), A = THREE.MathUtils.degToRad(15), P = THREE.MathUtils.degToRad(11)
+    Object.assign(controls, { minAzimuthAngle: sph.theta - A, maxAzimuthAngle: sph.theta + A, minPolarAngle: sph.phi - P, maxPolarAngle: Math.min(Math.PI / 2 - 0.05, sph.phi + P), minDistance: sph.radius * 0.5, maxDistance: sph.radius * 1.12, enablePan: true, rotateSpeed: 0.5 })
+  } else Object.assign(controls, { minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity, minPolarAngle: 0.25, maxPolarAngle: Math.PI / 2 + 0.3, minDistance: 0.9, maxDistance: 9, enablePan: true, rotateSpeed: 1 })
+}
+const _pc = new THREE.Vector3()
+function clampPan() {
+  if (mode !== 'shelf') return
+  const c = cabinetCenter(), t = controls.target
+  _pc.set(THREE.MathUtils.clamp(t.x, c.x - CW / 2, c.x + CW / 2), THREE.MathUtils.clamp(t.y, PLINTH + 0.3, PLINTH + NSH * SP - 0.3), THREE.MathUtils.clamp(t.z, -0.6, 0.6))
+  if (!_pc.equals(t)) { const d = _pc.clone().sub(t); t.add(d); camera.position.add(d) }
+}
+const par = new THREE.Vector2()
+addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') par.set(e.clientX / innerWidth - 0.5, e.clientY / innerHeight - 0.5) })
 
 const hemi = new THREE.HemisphereLight(0xffffff, 0xe8e2d6, 0.25); scene.add(hemi)
 const key = new THREE.DirectionalLight(0xfff4e6, 1.3); key.position.set(4, 9, 8); key.castShadow = true
 key.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048); key.shadow.radius = 6; key.shadow.bias = -0.0005; key.shadow.normalBias = 0.02
-Object.assign(key.shadow.camera, { left: -6, right: 6, top: 9, bottom: -1, near: 1, far: 30 }); scene.add(key)
+Object.assign(key.shadow.camera, { left: -6, right: 6, top: 9, bottom: -1, near: 1, far: 30 }); scene.add(key); scene.add(key.target)
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: 0.12 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor)
 
-// ---------------- cabinet ----------------
-const CW = 5.7, CD = 1.9, SP = 2.2, PLINTH = 0.35, FT = 0.09 // inner width, depth, shelf pitch, plinth, frame thickness
-let NSH = 3
+// ---------------- cabinets (solid oak, paged side by side) ----------------
+const CW = 5.7, CD = 1.9, SP = 2.2, PLINTH = 0.42, FT = 0.16 // inner width, depth, shelf pitch, plinth, frame thickness
+const NSH = 3, ROWS_PER_CAB = NSH, CAB_GAP = 0.9, CAB_PITCH = CW + 2 * FT + CAB_GAP
+let page = 0, nCab = 1
 const cabinet = new THREE.Group(); scene.add(cabinet)
-function oakTex() {
-  const c = canvas(1024, 256), g = c.getContext('2d'); g.fillStyle = '#d9bf98'; g.fillRect(0, 0, 1024, 256)
-  for (let i = 0; i < 140; i++) { const y = Math.random() * 256, a = 0.03 + Math.random() * 0.08; g.strokeStyle = `rgba(${120 + Math.random() * 40},${84 + Math.random() * 20},${48},${a})`; g.lineWidth = 0.6 + Math.random() * 2.4
-    g.beginPath(); g.moveTo(0, y); for (let x = 0; x <= 1024; x += 32) g.lineTo(x, y + Math.sin(x * 0.004 + i * 1.7) * 3 + Math.sin(x * 0.02 + i) * 0.8); g.stroke() }
-  const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.anisotropy = 8; return tx
+function grainCanvas(w, h, seed = 1) { // procedural oak: base colour + height (for normal) + roughness
+  const col = canvas(w, h), g = col.getContext('2d'), hc = canvas(w, h), hg = hc.getContext('2d'), rc = canvas(w, h), rg = rc.getContext('2d')
+  g.fillStyle = '#b48858'; g.fillRect(0, 0, w, h); hg.fillStyle = '#808080'; hg.fillRect(0, 0, w, h); rg.fillStyle = '#9a9a9a'; rg.fillRect(0, 0, w, h)
+  let r = seed * 9301; const rnd = () => ((r = (r * 9301 + 49297) % 233280) / 233280)
+  for (let i = 0; i < 220; i++) {
+    const y = rnd() * h, a = 0.04 + rnd() * 0.12, lw = 0.5 + rnd() * 3.2, ph = rnd() * 9, amp = 2 + rnd() * 6
+    const path = () => { g.beginPath(); for (let x = 0; x <= w; x += 16) { const yy = y + Math.sin(x * 0.003 + ph) * amp + Math.sin(x * 0.019 + i) * 1.1; x ? g.lineTo(x, yy) : g.moveTo(x, yy) } }
+    g.strokeStyle = `rgba(${95 + rnd() * 40},${62 + rnd() * 20},${32},${a})`; g.lineWidth = lw; path(); g.stroke()
+    hg.strokeStyle = `rgba(40,40,40,${a * 1.6})`; hg.lineWidth = lw; hg.beginPath(); for (let x = 0; x <= w; x += 16) { const yy = y + Math.sin(x * 0.003 + ph) * amp + Math.sin(x * 0.019 + i) * 1.1; x ? hg.lineTo(x, yy) : hg.moveTo(x, yy) } hg.stroke()
+    rg.strokeStyle = `rgba(230,230,230,${a})`; rg.lineWidth = lw; rg.beginPath(); for (let x = 0; x <= w; x += 16) { const yy = y + Math.sin(x * 0.003 + ph) * amp; x ? rg.lineTo(x, yy) : rg.moveTo(x, yy) } rg.stroke()
+  }
+  for (let i = 0; i < 18; i++) { const x = rnd() * w, y = rnd() * h; g.fillStyle = 'rgba(110,70,35,.10)'; g.beginPath(); g.ellipse(x, y, 10 + rnd() * 20, 3 + rnd() * 4, 0, 0, 7); g.fill() } // pores / knots
+  // height → normal map
+  const hd = hg.getImageData(0, 0, w, h).data, nc = canvas(w, h), ng = nc.getContext('2d'), nd = ng.createImageData(w, h)
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, hx = hd[(y * w + ((x + 1) % w)) * 4] - hd[i], hy = hd[(((y + 1) % h) * w + x) * 4] - hd[i]
+    const nx = -hx / 255 * 3, ny = -hy / 255 * 3, l = Math.hypot(nx, ny, 1); nd.data[i] = (nx / l * 0.5 + 0.5) * 255; nd.data[i + 1] = (ny / l * 0.5 + 0.5) * 255; nd.data[i + 2] = (1 / l * 0.5 + 0.5) * 255; nd.data[i + 3] = 255
+  }
+  ng.putImageData(nd, 0, 0)
+  const T = (c, srgb) => { const t = new THREE.CanvasTexture(c); if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; return t }
+  return { map: T(col, true), normalMap: T(nc), roughnessMap: T(rc) }
 }
-const oak = oakTex()
-const frameMat = new THREE.MeshPhysicalMaterial({ map: oak, roughness: 0.55, clearcoat: 0.25, clearcoatRoughness: 0.45 })
-const frameMatV = frameMat.clone(); frameMatV.map = oak.clone(); frameMatV.map.rotation = Math.PI / 2; frameMatV.map.needsUpdate = true
+const WOOD = grainCanvas(1024, 256, 3)
+function woodMat(rot = 0, rep = [1, 1]) {
+  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.62, clearcoat: 0.35, clearcoatRoughness: 0.4, normalScale: new THREE.Vector2(0.6, 0.6), sheen: 0.15 })
+  for (const k of ['map', 'normalMap', 'roughnessMap']) { const t = WOOD[k].clone(); t.rotation = rot; t.repeat.set(...rep); t.needsUpdate = true; m[k] = t }
+  return m
+}
+const frameMat = woodMat(0, [1.5, 1]), frameMatV = woodMat(Math.PI / 2, [1.5, 1]), shelfWood = woodMat(0, [2, 0.5])
 function washTex() {
   const c = canvas(256, 256), g = c.getContext('2d'), gr = g.createRadialGradient(128, 0, 0, 128, 0, 230)
   gr.addColorStop(0, 'rgba(255,236,205,.85)'); gr.addColorStop(0.45, 'rgba(255,236,205,.28)'); gr.addColorStop(1, 'rgba(255,236,205,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 256)
   const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx
 }
 const washMat = new THREE.MeshBasicMaterial({ map: washTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.3 })
+function aoTex() { // soft contact shadow / AO blob
+  const c = canvas(256, 256), g = c.getContext('2d'), gr = g.createRadialGradient(128, 128, 20, 128, 128, 128)
+  gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(0.6, 'rgba(0,0,0,.22)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 256, 256); return new THREE.CanvasTexture(c)
+}
+const aoMat = new THREE.MeshBasicMaterial({ map: aoTex(), transparent: true, depthWrite: false })
+const cornerAO = new THREE.MeshBasicMaterial({ map: (() => { const c = canvas(64, 256), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 64, 0); gr.addColorStop(0, 'rgba(40,25,10,.35)'); gr.addColorStop(1, 'rgba(40,25,10,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 256); return new THREE.CanvasTexture(c) })(), transparent: true, depthWrite: false })
 function streakTex() {
   const c = canvas(256, 512), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 256, 512)
   gr.addColorStop(0.0, 'rgba(255,255,255,0)'); gr.addColorStop(0.38, 'rgba(255,255,255,0)'); gr.addColorStop(0.45, 'rgba(255,255,255,.22)'); gr.addColorStop(0.5, 'rgba(255,255,255,.05)'); gr.addColorStop(0.56, 'rgba(255,255,255,.14)'); gr.addColorStop(0.62, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(255,255,255,0)')
-  g.fillStyle = gr; g.fillRect(0, 0, 256, 512); const tx = new THREE.CanvasTexture(c); return tx
+  g.fillStyle = gr; g.fillRect(0, 0, 256, 512); return new THREE.CanvasTexture(c)
 }
-const streakMat = new THREE.MeshBasicMaterial({ map: streakTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.4, side: THREE.DoubleSide })
+const streakMat = new THREE.MeshBasicMaterial({ map: streakTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.35, side: THREE.DoubleSide })
 function linenTex() {
   const c = canvas(512, 512), g = c.getContext('2d'); g.fillStyle = '#ece7df'; g.fillRect(0, 0, 512, 512)
   for (let i = 0; i < 9000; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '120,105,85'},${Math.random() * 0.05})`; g.fillRect(Math.random() * 512, Math.random() * 512, 1 + Math.random() * 3, 1) }
   const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(3, 3); return tx
 }
-const backMat = new THREE.MeshStandardMaterial({ map: linenTex(), color: 0xd9d3c9, roughness: 0.92 })
-const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xf2fbf8, roughness: 0.04, metalness: 0, transparent: true, opacity: 0.28, clearcoat: 1, clearcoatRoughness: 0.03, specularIntensity: 1, depthWrite: false })
-const doorGlass = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.02, transparent: true, opacity: 0.035, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, depthWrite: false, side: THREE.DoubleSide })
+const backMat = new THREE.MeshStandardMaterial({ map: linenTex(), color: 0xd2cbc0, roughness: 0.92 })
+// 10 mm float glass: faint green body, strong clearcoat reflections of the room env, green edges
+const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xeaf6f0, roughness: 0.03, metalness: 0, transparent: true, opacity: 0.22, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, envMapIntensity: 1.4, depthWrite: false })
+const glassEdge = new THREE.MeshPhysicalMaterial({ color: 0x6fb89a, roughness: 0.08, transparent: true, opacity: 0.85, clearcoat: 1, envMapIntensity: 1.2 })
+const doorGlass = new THREE.MeshPhysicalMaterial({ color: 0xf4fbf8, roughness: 0.02, transparent: true, opacity: 0.06, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, envMapIntensity: 1.6, depthWrite: false, side: THREE.DoubleSide })
+const brass = new THREE.MeshPhysicalMaterial({ color: 0xc9a46a, metalness: 1, roughness: 0.28, clearcoat: 0.3 })
+const alu = new THREE.MeshPhysicalMaterial({ color: 0xb8bcc0, metalness: 1, roughness: 0.35 })
 const ledMat = new THREE.MeshBasicMaterial({ color: 0xfff1d8 })
 const doors = []
 let shelfY = []
-function box(w, h, d, mat, parent, x, y, z, cast = true) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = true; parent.add(m); return m }
-function buildCabinet(n) {
-  cabinet.clear(); doors.length = 0; NSH = n
-  const inH = n * SP, outW = CW + 2 * FT, outH = inH + PLINTH + FT
-  box(FT, outH, CD + FT, frameMatV, cabinet, -CW / 2 - FT / 2, outH / 2, 0)
-  box(FT, outH, CD + FT, frameMatV, cabinet, CW / 2 + FT / 2, outH / 2, 0)
-  box(outW, FT, CD + FT, frameMat, cabinet, 0, outH - FT / 2, 0)
-  box(outW, PLINTH, CD + FT, frameMat, cabinet, 0, PLINTH / 2, 0)
-  box(CW, inH, 0.04, backMat, cabinet, 0, PLINTH + inH / 2, -CD / 2 + 0.02, false)
-  shelfY = []
-  for (let i = 0; i < n; i++) {
-    const y = PLINTH + i * SP
-    shelfY.push(y + (i === 0 ? 0 : 0.02))
-    if (i > 0) { // glass shelf with polished edge
-      const g = box(CW, 0.024, CD - 0.08, glassMat, cabinet, 0, y + 0.012, 0.0, false); g.renderOrder = 1
-      box(CW, 0.024, 0.012, new THREE.MeshPhysicalMaterial({ color: 0xd8efe8, roughness: 0.1, transparent: true, opacity: 0.55 }), cabinet, 0, y + 0.012, CD / 2 - 0.046, false)
-    }
-    // LED strip under the shelf above + soft area light washing down
-    const top = y + SP - (i === n - 1 ? 0 : 0.0)
-    box(CW - 0.2, 0.018, 0.03, ledMat, cabinet, 0, top - 0.02, CD / 2 - 0.12, false)
-    const ra = new THREE.RectAreaLight(0xfff0d6, mobile ? 2.2 : 2.6, CW - 0.3, 0.12)
-    ra.position.set(0, top - 0.04, CD / 2 - 0.2); ra.lookAt(0, y, CD / 2 - 0.4); cabinet.add(ra)
-    const wash = new THREE.Mesh(new THREE.PlaneGeometry(CW, SP * 0.95), washMat); wash.position.set(0, top - SP * 0.475, -CD / 2 + 0.045); cabinet.add(wash)
-  }
-  // glass doors (hinged on the outer sides), slim white frames
-  for (const sx of [-1, 1]) {
-    const pivot = new THREE.Group(); pivot.position.set(sx * (CW / 2 + FT * 0.5), PLINTH, CD / 2 + FT / 2 + 0.02); cabinet.add(pivot)
-    const dw = CW / 2 + FT * 0.5, door = new THREE.Group(); pivot.add(door)
-    const pane = new THREE.Mesh(new THREE.PlaneGeometry(dw - 0.08, inH - 0.08), doorGlass); pane.position.set(-sx * dw / 2, inH / 2, 0); pane.renderOrder = 3; door.add(pane)
-    const st = new THREE.Mesh(new THREE.PlaneGeometry(dw - 0.08, inH - 0.08), streakMat); st.position.set(-sx * dw / 2, inH / 2, 0.002); st.renderOrder = 4; door.add(st)
-    const fm = frameMatV
-    box(dw, 0.05, 0.03, fm, door, -sx * dw / 2, 0.025, 0, false); box(dw, 0.05, 0.03, fm, door, -sx * dw / 2, inH - 0.025, 0, false)
-    box(0.05, inH, 0.03, fm, door, -sx * 0.025, inH / 2, 0, false); box(0.035, inH, 0.03, fm, door, -sx * (dw - 0.018), inH / 2, 0, false)
-    box(0.02, 0.5, 0.04, new THREE.MeshPhysicalMaterial({ color: 0xc8a46a, metalness: 0.9, roughness: 0.3 }), door, -sx * (dw - 0.09), inH / 2, 0.035, false) // brass pull
-    pivot.userData.sx = sx; doors.push(pivot)
-  }
+const RB = {}
+function rbox(w, h, d, r = 0.012) { const k = [w, h, d, r].map((v) => v.toFixed(3)).join(); return (RB[k] ||= new RoundedBoxGeometry(w, h, d, 3, r)) }
+function box(w, h, d, mat, parent, x, y, z, cast = true, r = 0) {
+  const m = new THREE.Mesh(r ? rbox(w, h, d, r) : new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = true; parent.add(m); return m
 }
+function plane(w, h, mat, parent, x, y, z, rx = 0, ry = 0) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.position.set(x, y, z); m.rotation.set(rx, ry, 0); parent.add(m); return m }
+for (let i = 0; i < NSH; i++) shelfY.push(PLINTH + i * SP + (i === 0 ? 0 : 0.04))
+function buildOne(ci) {
+  const G = new THREE.Group(); G.position.x = ci * CAB_PITCH; cabinet.add(G)
+  const inH = NSH * SP, outW = CW + 2 * FT, outH = inH + PLINTH + FT, DD = CD + FT
+  // carcass: thick bevelled oak sides, top and back
+  box(FT, outH, DD, frameMatV, G, -CW / 2 - FT / 2, outH / 2, 0, true, 0.02)
+  box(FT, outH, DD, frameMatV, G, CW / 2 + FT / 2, outH / 2, 0, true, 0.02)
+  box(outW, FT, DD, frameMat, G, 0, outH - FT / 2, 0, true, 0.02)
+  // crown moulding: stepped, overhanging profile
+  box(outW + 0.12, 0.06, DD + 0.1, frameMat, G, 0, outH + 0.03, 0.05, true, 0.02)
+  box(outW + 0.22, 0.07, DD + 0.17, frameMat, G, 0, outH + 0.095, 0.085, true, 0.03)
+  box(outW + 0.16, 0.035, DD + 0.13, frameMat, G, 0, outH + 0.15, 0.065, true, 0.015)
+  // plinth: recessed toe-kick + overhanging base board
+  box(outW - 0.1, PLINTH - 0.08, DD - 0.12, new THREE.MeshStandardMaterial({ color: 0x5a4632, roughness: 0.8 }), G, 0, (PLINTH - 0.08) / 2, -0.04)
+  box(outW + 0.04, 0.09, DD + 0.04, frameMat, G, 0, PLINTH - 0.045, 0.01, true, 0.02)
+  box(CW, inH, 0.05, backMat, G, 0, PLINTH + inH / 2, -CD / 2 + 0.025, false)
+  // inner corner AO strips
+  for (const sx of [-1, 1]) { const a = plane(0.25, inH, cornerAO, G, sx * (CW / 2 - 0.125), PLINTH + inH / 2, -CD / 2 + 0.052); a.scale.x = -sx }
+  for (let i = 0; i < NSH; i++) {
+    const y = PLINTH + i * SP
+    if (i > 0) { // 10 mm glass shelf on brass pins, green polished edge
+      const g = box(CW - 0.02, 0.03, CD - 0.1, glassMat, G, 0, y + 0.015, -0.01, false); g.renderOrder = 1
+      box(CW - 0.02, 0.03, 0.012, glassEdge, G, 0, y + 0.015, CD / 2 - 0.066, false)
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(0.03, 0.012, 0.012, brass, G, sx * (CW / 2 - 0.02), y - 0.006, sz * (CD / 2 - 0.25), false)
+    } else box(CW, 0.05, CD, shelfWood, G, 0, y - 0.025, 0, false, 0.008) // solid base shelf
+    // LED housing: aluminium channel with diffuser under the shelf above
+    const top = y + SP
+    box(CW - 0.3, 0.035, 0.06, alu, G, 0, top - 0.035, CD / 2 - 0.13, false, 0.006)
+    box(CW - 0.34, 0.01, 0.04, ledMat, G, 0, top - 0.055, CD / 2 - 0.13, false)
+    plane(CW, SP * 0.95, washMat, G, 0, top - SP * 0.475, -CD / 2 + 0.055)
+    if (!i) plane(CW - 0.1, 0.5, aoMat, G, 0, y + 0.004, -0.2, -Math.PI / 2).scale.y = 2.4 // soft contact shadow on the solid base
+  }
+  // floor contact shadow under the cabinet
+  plane(outW + 0.9, DD + 0.9, aoMat, G, 0, 0.003, 0, -Math.PI / 2)
+  // framed glass doors on brass barrel hinges with bar pulls
+  for (const sx of [-1, 1]) {
+    const pivot = new THREE.Group(); pivot.position.set(sx * (CW / 2 + FT * 0.5), PLINTH, CD / 2 + FT / 2 + 0.03); G.add(pivot)
+    const dw = CW / 2 + FT * 0.5, door = new THREE.Group(); pivot.add(door)
+    const pane = plane(dw - 0.12, inH - 0.12, doorGlass, door, -sx * dw / 2, inH / 2, 0); pane.renderOrder = 3
+    const st = plane(dw - 0.12, inH - 0.12, streakMat, door, -sx * dw / 2, inH / 2, 0.003); st.renderOrder = 4
+    box(dw, 0.075, 0.045, frameMat, door, -sx * dw / 2, 0.0375, 0, false, 0.01); box(dw, 0.075, 0.045, frameMat, door, -sx * dw / 2, inH - 0.0375, 0, false, 0.01)
+    box(0.075, inH, 0.045, frameMatV, door, -sx * 0.0375, inH / 2, 0, false, 0.01); box(0.05, inH, 0.045, frameMatV, door, -sx * (dw - 0.025), inH / 2, 0, false, 0.01)
+    for (const hy of [0.25, inH / 2, inH - 0.25]) { const h = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.12, 16), brass); h.position.set(0, hy, 0.0); door.add(h) }
+    const pull = new THREE.Group(); door.add(pull); pull.position.set(-sx * (dw - 0.11), inH / 2, 0.05)
+    box(0.022, 0.6, 0.022, brass, pull, 0, 0, 0.03, false, 0.008); box(0.02, 0.02, 0.05, brass, pull, 0, 0.27, 0.005, false); box(0.02, 0.02, 0.05, brass, pull, 0, -0.27, 0.005, false)
+    pivot.userData = { sx, ci }; doors.push(pivot)
+  }
+  return G
+}
+function buildCabinets(n) {
+  if (n === nCab && cabinet.children.length) return
+  cabinet.traverse((o) => { if (o.isMesh && o.geometry && !Object.values(RB).includes(o.geometry)) o.geometry.dispose() })
+  cabinet.clear(); doors.length = 0; nCab = n
+  for (let i = 0; i < n; i++) buildOne(i)
+  page = Math.min(page, n - 1); placeLights()
+}
+// one set of area lights follows the current page (RectAreaLights are expensive per fragment)
+const lightRig = new THREE.Group(); scene.add(lightRig)
+for (let i = 0; i < NSH; i++) {
+  const top = PLINTH + i * SP + SP
+  const ra = new THREE.RectAreaLight(0xfff0d6, mobile ? 2.2 : 2.6, CW - 0.3, 0.12); ra.position.set(0, top - 0.06, CD / 2 - 0.2); ra.lookAt(0, top - SP, CD / 2 - 0.4); lightRig.add(ra)
+}
+function placeLights() { lightRig.position.x = page * CAB_PITCH; key.position.x = 4 + page * CAB_PITCH; key.target.position.x = page * CAB_PITCH; key.target.updateMatrixWorld() }
 let doorOpen = 0, doorTarget = 0
-function cabinetCenter() { return new THREE.Vector3(0, PLINTH + (NSH * SP) / 2, 0) }
+function cabinetCenter() { return new THREE.Vector3(page * CAB_PITCH, PLINTH + (NSH * SP) / 2, 0) }
 
 // ---------------- proxies on the shelf ----------------
 const tintMat = new THREE.MeshPhysicalMaterial({ color: 0x1846d0, roughness: 0.18, transparent: true, opacity: 0.88, clearcoat: 0.8, clearcoatRoughness: 0.1 })
@@ -148,7 +230,14 @@ const tintMats = { ps5: tintMat,
   ns2: new THREE.MeshPhysicalMaterial({ color: 0xc8101e, roughness: 0.16, transparent: true, opacity: 0.88, clearcoat: 0.8, clearcoatRoughness: 0.1 }) }
 const proxyGeos = {}
 const specOf = (e) => platformSpec(e?.platform)
-function proxyGeo(p) { const s = platformSpec(p); return (proxyGeos[s.W + ':' + s.D] ||= new THREE.BoxGeometry(s.W, s.H, s.D)) }
+// 4 draw groups instead of 6: [tint (+x,+y,−y), spine (−x), front (+z), back (−z)]
+function proxyGeo(p) {
+  const s = platformSpec(p), k = s.W + ':' + s.D; if (proxyGeos[k]) return proxyGeos[k]
+  const g = new THREE.BoxGeometry(s.W, s.H, s.D), idx = g.index.array, gr = g.groups, out = [], ng = []
+  const take = (faces, m) => { const st = out.length; for (const f of faces) for (let i = gr[f].start; i < gr[f].start + gr[f].count; i++) out.push(idx[i]); ng.push({ start: st, count: out.length - st, materialIndex: m }) }
+  take([0, 2, 3], 0); take([1], 1); take([4], 2); take([5], 3)
+  g.setIndex(out); g.clearGroups(); ng.forEach((x) => g.addGroup(x.start, x.count, x.materialIndex)); return (proxyGeos[k] = g)
+}
 let entries = [], proxies = new Map(), artCache = new Map(), viewMode = localStorage.getItem('showcase-view') || 'spine'
 const TEXMAX = mobile ? 512 : 768
 function shrink(src, max) {
@@ -158,7 +247,7 @@ function shrink(src, max) {
 function proxyMats(art, p = 'ps5') {
   const tintMat = tintMats[p] || tintMats.ps5
   const film = (map) => new THREE.MeshPhysicalMaterial({ map, roughness: 0.42, clearcoat: 0.7, clearcoatRoughness: 0.12 })
-  return [tintMat, film(shrink(art.spine, TEXMAX)), tintMat, tintMat, film(shrink(art.front, TEXMAX)), film(shrink(art.back, TEXMAX))]
+  return [tintMat, film(shrink(art.spine, TEXMAX)), film(shrink(art.front, TEXMAX)), film(shrink(art.back, TEXMAX))]
 }
 let re4Promise = null
 async function getArt(e) {
@@ -168,38 +257,84 @@ async function getArt(e) {
   else { const imgs = {}; for (const k of Object.keys(TEMPLATES)) imgs[k] = await blobToImage(e.slots?.[k]?.blob); art = buildArt(e, imgs) }
   artCache.set(e.id, art); return art
 }
-// Mixed shelves: every case keeps its real footprint (PS5 13.5 mm spine, Switch 11 mm), packed row by row.
-let LAY = []
-function computeLayout() {
-  const avail = viewMode === 'spine' ? CW - 0.3 : CW - 0.2, rows = [[]]; let used = 0
-  for (const e of entries) { const s = specOf(e), w = viewMode === 'spine' ? s.D + 0.045 : s.W + 0.16; if (used + w > avail && rows[rows.length - 1].length) { rows.push([]); used = 0 } rows[rows.length - 1].push({ e, w, s }); used += w }
-  LAY = []; rows.forEach((r, ri) => { const tot = r.reduce((a, b) => a + b.w, 0); let x = -tot / 2; for (const it of r) { LAY.push({ row: ri, x: x + it.w / 2, s: it.s }); x += it.w } })
-  return rows.length
+// ---------- view list: search / platform filter / sort ----------
+let fQuery = '', fPlat = 'all', fSort = localStorage.getItem('showcase-sort') || 'custom', view = []
+function computeView() {
+  const q = norm(fQuery)
+  view = entries.filter((e) => (fPlat === 'all' || (e.platform || 'ps5') === fPlat) && (!q || norm(e.title).includes(q) || Object.values(e.lookup?.titles || {}).some((x) => norm(x).includes(q))))
+  const by = { name: (a, b) => (a.title || '').localeCompare(b.title || '', lang === 'en' ? 'en' : 'zh'), date: (a, b) => (b.lookup?.date || b.createdAt || 0) > (a.lookup?.date || a.createdAt || 0) ? 1 : -1, platform: (a, b) => (a.platform || 'ps5').localeCompare(b.platform || 'ps5') || (a.order - b.order), custom: (a, b) => a.order - b.order }
+  view.sort(by[fSort] || by.custom)
 }
-function capacity() { return viewMode === 'spine' ? Math.floor((CW - 0.3) / (D + 0.045)) : Math.floor((CW - 0.2) / (W + 0.16)) }
-function layoutTarget(i) {
-  const L = LAY[i], shelf = NSH - 1 - L.row, y = shelfY[shelf] + 0.024 + L.s.H / 2
-  if (viewMode === 'spine') return { p: new THREE.Vector3(L.x, y, -0.05), r: new THREE.Euler(0, Math.PI / 2, 0) }
-  return { p: new THREE.Vector3(L.x, y + 0.01, -0.35), r: new THREE.Euler(-0.07, 0, 0) }
+// Mixed shelves: every case keeps its real footprint (PS5 13.5 mm spine, Switch 11 mm), packed row by row; 3 rows per cabinet.
+let LAY = new Map()
+function computeLayout() {
+  computeView()
+  const avail = viewMode === 'spine' ? CW - 0.3 : CW - 0.2, rows = [[]]; let used = 0
+  for (const e of view) { const s = specOf(e), w = viewMode === 'spine' ? s.D + 0.045 : s.W + 0.16; if (used + w > avail && rows[rows.length - 1].length) { rows.push([]); used = 0 } rows[rows.length - 1].push({ e, w, s }); used += w }
+  LAY = new Map(); rows.forEach((r, ri) => { const tot = r.reduce((a, b) => a + b.w, 0); let x = -tot / 2; for (const it of r) { LAY.set(it.e.id, { row: ri, cab: Math.floor(ri / ROWS_PER_CAB), x: x + it.w / 2, s: it.s }); x += it.w } })
+  return Math.max(1, Math.ceil(rows.filter((r) => r.length).length / ROWS_PER_CAB))
+}
+function layoutTarget(id) {
+  const L = LAY.get(id); if (!L) return null
+  const shelf = NSH - 1 - (L.row % ROWS_PER_CAB), y = shelfY[shelf] + 0.024 + L.s.H / 2, x = L.cab * CAB_PITCH + L.x
+  if (viewMode === 'spine') return { p: new THREE.Vector3(x, y, -0.05), r: new THREE.Euler(0, Math.PI / 2, 0), cab: L.cab }
+  return { p: new THREE.Vector3(x, y + 0.01, -0.35), r: new THREE.Euler(-0.07, 0, 0), cab: L.cab }
+}
+// placeholder material per platform until the art is near the current page (lazy texture streaming)
+const phMats = {}
+// single material → one draw call per not-yet-streamed proxy
+function placeholderMats(p) { return (phMats[p] ||= new THREE.MeshStandardMaterial({ color: p === 'ns' ? 0xc4101e : p === 'ns2' ? 0x6a1820 : 0x1d2433, roughness: 0.55 })) }
+const isPh = (m) => Object.values(phMats).includes(m.material)
+function freeMats(m) { if (!isPh(m) && Array.isArray(m.material)) m.material.forEach((x) => { if (x.map) { x.map.dispose(); x.dispose() } }) }
+let streamQ = [], streaming = false
+async function streamTick() { // one proxy texture per frame-ish; keeps 200+ items smooth
+  if (streaming || !streamQ.length) return; streaming = true
+  const id = streamQ.shift(), e = entries.find((x) => x.id === id), m = proxies.get(id)
+  if (e && m && isPh(m) && Math.abs((m.userData.cab ?? 0) - page) <= 1) {
+    const art = await getArt(e); if (proxies.get(id) === m && isPh(m)) { m.material = proxyMats(art, e.platform || 'ps5'); dirty = 2 }
+    if (!(sel && sel.id === id) && !(editing && editing.id === id)) artCache.delete(id) // keep only GPU textures; regenerate on inspect
+  }
+  streaming = false
+}
+function updateStreaming() {
+  streamQ = []
+  for (const [id, m] of proxies) {
+    const d = Math.abs((m.userData.cab ?? 0) - page), shown = LAY.has(id)
+    m.visible = shown && d <= 1 && !(sel && sel.id === id && (mode === 'inspect' || mode === 'editor'))
+    if (!shown || d > 1) { if (!isPh(m)) { freeMats(m); m.material = placeholderMats(m.userData.plat) } }
+    else if (isPh(m)) streamQ.push(id)
+  }
+  streamQ.sort((a, b) => Math.abs(proxies.get(a).userData.cab - page) - Math.abs(proxies.get(b).userData.cab - page))
 }
 async function syncShelf(animate = true) {
-  const need = Math.max(3, computeLayout())
-  if (need !== NSH || !cabinet.children.length) buildCabinet(need)
+  buildCabinets(computeLayout())
   const ids = new Set(entries.map((e) => e.id))
-  for (const [id, m] of proxies) if (!ids.has(id)) { scene.remove(m); m.material.forEach((x) => x.map && x.map.dispose()); proxies.delete(id) }
-  for (const [i, e] of entries.entries()) {
+  for (const [id, m] of proxies) if (!ids.has(id)) { scene.remove(m); freeMats(m); proxies.delete(id) }
+  for (const e of entries) {
     let m = proxies.get(e.id)
-    if (!m) { const art = await getArt(e); m = new THREE.Mesh(proxyGeo(e.platform), proxyMats(art, e.platform || 'ps5')); m.castShadow = true; m.receiveShadow = true; m.userData.id = e.id; scene.add(m); proxies.set(e.id, m); m.userData.fresh = true }
-    const L = layoutTarget(i); m.userData.home = L
-    if (!animate || m.userData.fresh) { m.position.copy(L.p); m.rotation.copy(L.r); if (m.userData.fresh && animate) { m.scale.setScalar(0.001); m.userData.pop = 0 } m.userData.fresh = false }
+    if (!m) { m = new THREE.Mesh(proxyGeo(e.platform), placeholderMats(e.platform || 'ps5')); m.castShadow = true; m.receiveShadow = true; m.userData.id = e.id; m.userData.plat = e.platform || 'ps5'; scene.add(m); proxies.set(e.id, m); m.userData.fresh = true }
+    const L = layoutTarget(e.id); if (!L) { m.visible = false; continue }
+    m.userData.home = L; m.userData.cab = L.cab
+    if (!animate || m.userData.fresh || Math.abs(L.cab - page) > 1) { m.position.copy(L.p); m.rotation.copy(L.r); if (m.userData.fresh && animate && Math.abs(L.cab - page) <= 1) { m.scale.setScalar(0.001); m.userData.pop = 0 } m.userData.fresh = false }
     else m.userData.glide = { from: m.position.clone(), q0: m.quaternion.clone(), t: 0 }
   }
+  updateStreaming(); syncPager()
   $('empty').classList.toggle('hidden', entries.length > 0 || mode !== 'shelf')
   dirty = 3
 }
 async function refreshProxy(e) {
   artCache.delete(e.id); const m = proxies.get(e.id); if (!m) return
-  const art = await getArt(e); m.material.forEach((x) => x.map && x.map.dispose()); m.geometry = proxyGeo(e.platform); m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
+  const art = await getArt(e); freeMats(m); m.geometry = proxyGeo(e.platform); m.userData.plat = e.platform || 'ps5'; m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
+}
+function goPage(p, cam = true) {
+  p = THREE.MathUtils.clamp(p, 0, nCab - 1); if (p === page && cam) { goCam(camShelfGoal()); return }
+  page = p; placeLights(); updateStreaming(); syncPager(); if (cam && mode === 'shelf') { goCam(camShelfGoal()); applyLimits() } dirty = 3
+}
+function syncPager() {
+  const el = $('pager'); if (!el) return; el.classList.toggle('hidden', nCab <= 1)
+  $('pgLbl').textContent = `${page + 1} / ${nCab}`; $('pgPrev').disabled = page <= 0; $('pgNext').disabled = page >= nCab - 1
+  const j = $('pgJump'); if (j.options.length !== nCab) { j.innerHTML = ''; for (let i = 0; i < nCab; i++) { const first = view.find((e) => LAY.get(e.id)?.cab === i); const o = document.createElement('option'); o.value = i; o.textContent = `${i + 1} · ${first ? first.title.slice(0, 14) : ''}`; j.appendChild(o) } }
+  j.value = page
 }
 
 // ---------------- inspect model (one shared full case) ----------------
@@ -226,7 +361,7 @@ let mode = 'shelf' // shelf | fly | inspect | back | editor
 let sel = null, flyT = 0, flyFrom = null
 let open = 0, openT = 0, hubP = 0, hubT = 0, out = 0, outT = 0, discFocus = false, flip = 0, flipT = 0, spin = 0, releaseArmed = false, reseating = false
 let dirty = 3, pending = null
-function setMode(m) { mode = m; document.body.className = 'mode-' + m; $('inspect').classList.toggle('hidden', !(m === 'inspect')); $('empty').classList.toggle('hidden', entries.length > 0 || m !== 'shelf'); syncInspectUI(); dirty = 3 }
+function setMode(m) { mode = m; applyLimits(); if (typeof updateStreaming === 'function' && entries.length) updateStreaming(); document.body.className = 'mode-' + m; $('inspect').classList.toggle('hidden', !(m === 'inspect')); $('empty').classList.toggle('hidden', entries.length > 0 || m !== 'shelf'); syncInspectUI(); dirty = 3 }
 function camShelfGoal() {
   const c = cabinetCenter(), h = NSH * SP + PLINTH, aspect = innerWidth / innerHeight
   const fov = THREE.MathUtils.degToRad(camera.fov), distH = (h * 0.54) / Math.tan(fov / 2), distW = ((CW + 0.6) * 0.55) / (Math.tan(fov / 2) * aspect)
@@ -281,6 +416,7 @@ function syncInspectUI() {
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2(); let downAt = null
 cv.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY, performance.now()]; closeMenus() })
 cv.addEventListener('pointerup', (e) => {
+  if (downAt && mode === 'shelf') { const dx = e.clientX - downAt[0], dy = e.clientY - downAt[1]; if (Math.abs(dx) > 90 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - downAt[2] < 1500) { goPage(page + (dx < 0 ? 1 : -1)); return } }
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 8 || performance.now() - downAt[2] > 600) return
   ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ptr, camera)
   if (mode === 'shelf') { const hit = ray.intersectObjects([...proxies.values()])[0]; if (hit) selectEntry(hit.object.userData.id); return }
@@ -304,7 +440,8 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.05); let busy = false
   // doors
   const d0 = doorOpen; doorOpen = step(doorOpen, doorTarget, dt, 0.8); if (d0 !== doorOpen) busy = true
-  doors.forEach((p) => (p.rotation.y = p.userData.sx * ease(doorOpen) * THREE.MathUtils.degToRad(105)))
+  doors.forEach((p) => (p.rotation.y = p.userData.ci === page ? p.userData.sx * ease(doorOpen) * THREE.MathUtils.degToRad(105) : 0))
+  streamTick()
   // shelf glides / pops
   for (const m of proxies.values()) {
     if (m.userData.glide) { const g = m.userData.glide; g.t = Math.min(1, g.t + dt / 0.6); const k = ease(g.t); m.position.lerpVectors(g.from, m.userData.home.p, k); _q.setFromEuler(m.userData.home.r); m.quaternion.slerpQuaternions(g.q0, _q, k); if (g.t >= 1) delete m.userData.glide; busy = true }
@@ -348,7 +485,8 @@ function tick() {
   }
   // camera
   if (auto && camGoal) {
-    const k = 1 - Math.exp(-dt * 3.2); camera.position.lerp(camGoal.p, k); controls.target.lerp(camGoal.t, k)
+    const k = 1 - Math.exp(-dt * 3.2)
+    if (mode === 'shelf' && !qs.has('shot')) { _v.copy(camGoal.p).add(new THREE.Vector3(par.x * 0.5, -par.y * 0.3, 0)); camera.position.lerp(_v, k) } else camera.position.lerp(camGoal.p, k); controls.target.lerp(camGoal.t, k)
     if (camera.position.distanceTo(camGoal.p) > 0.004) busy = true
   }
   const changed = controls.update()
@@ -398,18 +536,18 @@ $('iFlip').onclick = () => { flipT = flipT ? 0 : 1 }
 $('iBack').onclick = () => backToShelf()
 $('iDel').onclick = async () => {
   closeMenus(); if (!confirm(t('delQ').replace('%s', sel.title))) return
-  const id = sel.id; await db.del(id); holder.visible = false; model.disc.visible = false; outT = out = 0; openT = open = 0; hubT = hubP = 0; discFocus = false
+  const id = sel.id; await db.del(id); artCache.delete(id); holder.visible = false; model.disc.visible = false; outT = out = 0; openT = open = 0; hubT = hubP = 0; discFocus = false
   entries = entries.filter((e) => e.id !== id); await renumber(); sel = null; doorTarget = 0; setMode('shelf'); await syncShelf(); goCam(camShelfGoal()); toast(t('deleted'))
 }
 async function renumber() { entries.forEach((e, i) => (e.order = i)); await db.putMany(entries) }
 async function move(dir) {
-  closeMenus(); const i = entries.findIndex((e) => e.id === sel.id), j = i + dir; if (j < 0 || j >= entries.length) return
+  closeMenus(); if (fSort !== 'custom') { fSort = 'custom'; $('sort').value = 'custom' } const i = entries.findIndex((e) => e.id === sel.id), j = i + dir; if (j < 0 || j >= entries.length) return
   ;[entries[i], entries[j]] = [entries[j], entries[i]]; await renumber(); await syncShelf(true); proxies.get(sel.id).userData.glide = null; const m = proxies.get(sel.id); m.position.copy(INS); m.quaternion.copy(qFront)
 }
 $('iLeft').onclick = () => move(-1); $('iRight').onclick = () => move(1)
 $('iEdit').onclick = () => { closeMenus(); if (sel.sample) return toast(t('sampleRO')); openEditor(sel) }
 $('makeBtn').onclick = () => openEditor(null); $('emptyBtn').onclick = () => openEditor(null)
-addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (mode === 'editor') closeEditor(false); else if (mode === 'inspect') { if (discFocus) reseat(); else backToShelf() } } })
+addEventListener('keydown', (e) => { if (mode === 'shelf' && document.activeElement?.tagName !== 'INPUT') { if (e.key === 'ArrowRight') goPage(page + 1); if (e.key === 'ArrowLeft') goPage(page - 1) } if (e.key === 'Escape') { if (mode === 'editor') closeEditor(false); else if (mode === 'inspect') { if (discFocus) reseat(); else backToShelf() } } })
 
 // ---------------- editor ----------------
 let editing = null, draft = null, draftImgs = {}, draftArt = null, cropKey = null, artTimer = 0, prevSel = null, prevMode = null
@@ -502,7 +640,7 @@ async function runLookup(q) {
   lkRender('loading')
   const cat = await searchCatalog(q, 6); if (seq !== lkSeq) return
   lkResults = cat; lkRender(cat.length ? 'loading' : 'loading')
-  const web = (cat[0]?.score || 0) >= 0.92 && cat.length >= 3 ? [] : await searchWiki(q, 4).catch(() => [])
+  const web = (cat[0]?.score || 0) >= 0.92 && cat.length >= 3 ? [] : await Promise.race([searchWiki(q, 4).catch(() => []), new Promise((r) => setTimeout(() => r([]), 9000))])
   if (seq !== lkSeq) return
   const seen = new Set(cat.map((r) => norm(r.titles.en || r.title)))
   lkResults = [...cat, ...web.filter((r) => !seen.has(norm(r.titles.en || r.title)))].slice(0, 8)
@@ -513,13 +651,13 @@ async function applyLookup(r, picked) {
   lkRender(null); const filled = []
   if (picked || !$('fTitle').value.trim()) { $('fTitle').value = r.title; filled.push('title') }
   if (r.platform && r.platform !== draft.platform && (picked || !draft.platUser)) { setPlatform(r.platform); filled.push('platform') }
-  draft.lookup = { src: r.src, titles: r.titles, wiki: r.wiki || null, cover: r.cover || null }
+  draft.lookup = { src: r.src, titles: r.titles, wiki: r.wiki || null, cover: r.cover || null, date: r.date || null, publisher: r.publisher || null }
   if (r.cover && !draft.slots.front?.blob) {
     toast(t('processing')); const raw = await fetchImageBlob(r.cover)
     if (raw) {
       const blob = await downscale(raw, 1600), img = await blobToImage(blob)
       // package scans (portrait, already carry platform branding) → no generated band/badge, trim the scan border
-      const scan = img && img.height / img.width > 1.3
+      const scan = img && img.height / img.width > 1.2 && /cdjapan/.test(r.cover || '')
       draft.slots.front = { blob, crop: { x: 0, y: 0, s: scan ? 1.04 : 1 }, auto: true }; draftImgs.front = img
       if (scan) { draft.band = false; $('fBand').checked = false }
       filled.push('cover')
@@ -629,6 +767,11 @@ $('cRemove').onclick = () => { delete draft.slots[cropKey]; draftImgs[cropKey] =
 $('cDone').onclick = () => { $('crop').classList.add('hidden'); rebuildDraft(); renderSlots() }
 addEventListener('resize', () => { if (!$('crop').classList.contains('hidden')) drawCrop() })
 
+$('pgPrev').onclick = () => goPage(page - 1); $('pgNext').onclick = () => goPage(page + 1); $('pgJump').onchange = (e) => goPage(+e.target.value)
+let qTimer = 0
+$('q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { fQuery = $('q').value; page = 0; syncShelf(true).then(() => goPage(0)) }, 250) }
+$('pf').onclick = (e) => { const v = e.target.dataset?.p; if (!v) return; fPlat = v; for (const b of $('pf').children) b.setAttribute('aria-pressed', String(b.dataset.p === v)); page = 0; syncShelf(true).then(() => goPage(0)) }
+$('sort').value = fSort; $('sort').onchange = (e) => { fSort = e.target.value; localStorage.setItem('showcase-sort', fSort); syncShelf(true) }
 // ---------------- boot ----------------
 async function boot() {
   syncLang()
@@ -640,14 +783,13 @@ async function boot() {
       await db.put(s); entries = await db.all(); localStorage.setItem('showcase-seeded', '1')
     }
   } catch (err) { console.warn('IndexedDB unavailable', err) }
-  buildCabinet(Math.max(3, Math.ceil(entries.length / capacity())))
   await syncShelf(false)
   const g = camShelfGoal(); camera.position.copy(g.p).add(new THREE.Vector3(0.8, 0.6, 2.2)); controls.target.copy(g.t); goCam(g)
   controls.minDistance = 1.2; controls.maxDistance = 22
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  window.__sc = { bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 boot()

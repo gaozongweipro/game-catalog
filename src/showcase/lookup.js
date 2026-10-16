@@ -54,10 +54,20 @@ export async function searchWiki(q, limit = 5) {
     const plats = (e.claims?.P400 || []).map((c) => WD_PLAT[c.mainsnak?.datavalue?.value?.id]).filter(Boolean)
     let cover = null
     if (p.img) { const ii = await j(`https://${p.L}.wikipedia.org/w/api.php?action=query&format=json&origin=*&titles=File:${encodeURIComponent(p.img)}&prop=imageinfo&iiprop=url&iiurlwidth=700`); const pg = Object.values(ii?.query?.pages || {})[0]; cover = pg?.imageinfo?.[0]?.thumburl || pg?.imageinfo?.[0]?.url || null }
+    if (res.length >= limit * 2) break
     res.push({ src: 'wiki', score: 0.5, title: pickTitle(q, titles) || p.title, titles, platform: plats.includes('ns2') && !plats.includes('ps5') && !plats.includes('ns') ? 'ns2' : plats.includes('ps5') ? 'ps5' : plats.includes('ns') ? 'ns' : plats[0] || null, plats, cover, coverHost: 'wikipedia', wiki: `https://${p.L}.wikipedia.org/wiki/${encodeURIComponent(p.title)}` })
-    if (res.length >= limit) break
   }
-  return res
+  // rank by closeness to the query, then enrich from our catalog (better cover + exact platform) via the English label
+  const nq = norm(q)
+  for (const r of res) r.score = 0.5 * Math.max(...Object.values(r.titles).filter(Boolean).map((t) => score(nq, norm(t))), score(nq, norm(r.title)))
+  res.sort((a, b) => b.score - a.score)
+  for (const r of res) {
+    for (const t of [r.titles.en, r.titles.cn].filter(Boolean)) {
+      const c = (await searchCatalog(t, 1))[0]
+      if (c && c.score >= 0.9) { r.cover = c.cover; r.platform = c.platform; r.src = 'wiki+catalog'; r.date = c.date; r.publisher = c.publisher; r.titles = { ...c.titles, ...Object.fromEntries(Object.entries(r.titles).filter(([, v]) => v)) }; break }
+    }
+  }
+  return res.slice(0, limit)
 }
 /** Fetch an image as a Blob that canvas can use without tainting. */
 export async function fetchImageBlob(url) {
