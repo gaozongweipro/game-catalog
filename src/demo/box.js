@@ -161,7 +161,7 @@ const FRONT_W = INS_W * PX, FRONT_H = INS_H * PX, SPINE_W = Math.round((D - 0.00
 function frontTex() {
   const [c, g] = ctx(FRONT_W, FRONT_H)
   drawCover(g, 0, BANNER + 4, FRONT_W, FRONT_H - BANNER - 4)
-  banner(g, FRONT_W); ratingBox(g, 38, FRONT_H - 190, 120); return tex(c)
+  banner(g, FRONT_W); ratingBox(g, 38, FRONT_H - 190, 120); return c
 }
 function spineTex() {
   const [c, g] = ctx(SPINE_W, FRONT_H)
@@ -172,7 +172,7 @@ function spineTex() {
   g.save(); g.translate(SPINE_W / 2 + 2, 230); g.rotate(Math.PI / 2); g.fillStyle = '#f3ede4'; g.textBaseline = 'middle'
   g.font = '600 46px "Noto Serif CJK SC","Songti SC",serif'; g.fillText('羊蹄山之魂', 0, 0)
   g.font = '500 30px "Times New Roman",serif'; g.fillText('GHOST OF YŌTEI', 270, 2); g.restore()
-  ratingBox(g, (SPINE_W - 70) / 2, FRONT_H - 140, 70); return tex(c)
+  ratingBox(g, (SPINE_W - 70) / 2, FRONT_H - 140, 70); return c
 }
 function barcode(g, x, y, w, h) {
   g.fillStyle = '#fff'; g.fillRect(x - 10, y - 10, w + 20, h + 46); g.fillStyle = '#000'
@@ -203,7 +203,7 @@ function backTex() {
   ;['©2025 Sony Interactive Entertainment LLC. Ghost of Yōtei is a trademark of Sony Interactive Entertainment LLC.',
     '"PS5" and "PlayStation" are registered trademarks or trademarks of Sony Interactive Entertainment Inc.',
     '本游戏需要 PlayStation®5 主机。部分功能需要联网。'].forEach((l, i) => g.fillText(l, 150, 1205 + i * 22))
-  barcode(g, FRONT_W - 300, 1180, 240, 60); return tex(c)
+  barcode(g, FRONT_W - 300, 1180, 240, 60); return c
 }
 function discLabelTex() {
   const s = 1024, [c, g] = ctx(s, s)
@@ -354,25 +354,67 @@ const bkFace = mesh(new THREE.PlaneGeometry(bkW - 0.02, bkH - 0.02), bkPaper, bo
 bkFace.rotation.y = Math.PI
 bkFace.position.z = -bkT / 2 - 0.0005
 
-// Printed insert + clear sleeve
-const frontPaper = paperMat(null), backPaper = paperMat(null), spinePaper = paperMat(null)
-const insF = mesh(new THREE.PlaneGeometry(INS_W, INS_H), frontPaper, cover, false)
-insF.position.z = HALF + 0.0008
-const filmF = mesh(plate(W - 0.002, H - 0.002, RC, 0.0012, 0.0005), filmMat, cover, false)
-filmF.position.z = HALF + 0.0014
-const insB = mesh(new THREE.PlaneGeometry(INS_W, INS_H), backPaper, base, false)
-insB.rotation.y = Math.PI; insB.position.z = -HALF - 0.0012
-const filmB = mesh(plate(W - 0.002, H - 0.002, RC, 0.0012, 0.0005), filmMat, base, false)
-filmB.position.z = -HALF - 0.0028
-// spine print rides on the strip; clear sleeve is ONE wrap: front + spine + back, with rounded
-// film bends over both creases, open at top & bottom (insert slides in from there)
-const insS = mesh(new THREE.PlaneGeometry(D - 0.004, INS_H), spinePaper, spineG, false)
-insS.rotation.y = -Math.PI / 2; insS.position.set(-T - 0.0012, 0, D / 2)
-const filmS = mesh(new THREE.PlaneGeometry(D - 0.006, INS_H + 0.03), filmMat, spineG, false)
-filmS.rotation.y = -Math.PI / 2; filmS.position.set(-T - 0.0028, 0, D / 2)
-const bendGeo = new THREE.CylinderGeometry(0.0055, 0.0055, INS_H + 0.03, 10, 1, true, 0, Math.PI / 2)
-const bendA = mesh(bendGeo, filmMat, spineG, false); bendA.position.set(-T + 0.0027, 0, 0.0027); bendA.rotation.y = Math.PI
-const bendB = mesh(bendGeo, filmMat, spineG, false); bendB.position.set(-T + 0.0027, 0, D - 0.0027); bendB.rotation.y = -Math.PI / 2
+// ---- ONE printed wrap insert (back | spine | front) slid under ONE clear sleeve ----
+// Both are single ribbon meshes whose cross-section follows back panel → crease A → spine strip →
+// crease B → front panel. Vertices are linearly blended between the part frames each frame, so the
+// sheet bends around the living-hinge creases as the case opens (like real paper under the film).
+const wrapPaper = paperMat(null); wrapPaper.side = THREE.DoubleSide
+const EDGE = 0.016 // insert stops ~1.6 mm short of the opening edge
+function wrapPath(o) {
+  const pts = [] // {x,z,i,j,f}  frames: 0 base, 1 spine strip, 2 cover hinge
+  const xs = [W / 2 - EDGE, 0.2, -0.3, -W / 2 + 0.03, -W / 2]
+  for (const x of xs) pts.push({ x, z: -HALF - o, i: 0, j: 0, f: 0 })
+  const N = 10
+  for (let k = 1; k <= N; k++) { const t = (k / N) * Math.PI / 2; pts.push({ x: -W / 2 - (T + o) * Math.sin(t), z: -HALF - o * Math.cos(t), i: 0, j: 1, f: k / N }) }
+  pts.push({ x: -W / 2 - T - o, z: HALF, i: 1, j: 1, f: 0 })
+  for (let k = 1; k <= N; k++) { const t = (k / N) * Math.PI / 2; pts.push({ x: -W / 2 - (T + o) * Math.cos(t), z: HALF + o * Math.sin(t), i: 1, j: 2, f: k / N }) }
+  for (const x of [-W / 2 + 0.03, -0.3, 0.2, W / 2 - EDGE]) pts.push({ x, z: HALF + o, i: 2, j: 2, f: 0 })
+  let s = 0; pts.forEach((p, k) => { if (k) s += Math.hypot(p.x - pts[k - 1].x, p.z - pts[k - 1].z); p.s = s })
+  return pts
+}
+const REST = [new THREE.Matrix4(), new THREE.Matrix4().makeTranslation(-W / 2, 0, -HALF), new THREE.Matrix4().makeTranslation(-W / 2, 0, HALF)]
+const REST_INV = REST.map((m) => m.clone().invert())
+function ribbon(o, h, mat) {
+  const pts = wrapPath(o), total = pts[pts.length - 1].s
+  const geo = new THREE.BufferGeometry()
+  const pos = new Float32Array(pts.length * 2 * 3), uv = new Float32Array(pts.length * 2 * 2), idx = []
+  pts.forEach((p, k) => {
+    p.la = new THREE.Vector3(p.x, 0, p.z).applyMatrix4(REST_INV[p.i]); p.lb = new THREE.Vector3(p.x, 0, p.z).applyMatrix4(REST_INV[p.j])
+    uv.set([p.s / total, 0, p.s / total, 1], k * 4)
+    if (k) { const a = (k - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3) }
+  })
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); geo.setIndex(idx)
+  const m = mesh(geo, mat, root, false); m.frustumCulled = false
+  m.userData = { pts, h, total }
+  return m
+}
+const wrapIns = ribbon(0.0018, INS_H, wrapPaper)
+const sleeve = ribbon(0.0034, INS_H + 0.028, filmMat); sleeve.renderOrder = 2
+const _fm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()], _va = new THREE.Vector3(), _vb = new THREE.Vector3()
+function updateRibbon(m) {
+  const { pts, h } = m.userData, pos = m.geometry.attributes.position
+  pts.forEach((p, k) => {
+    _va.copy(p.la).applyMatrix4(_fm[p.i]); _vb.copy(p.lb).applyMatrix4(_fm[p.j]); _va.lerp(_vb, p.f)
+    pos.setXYZ(k * 2, _va.x, -h / 2, _va.z); pos.setXYZ(k * 2 + 1, _va.x, h / 2, _va.z)
+  })
+  pos.needsUpdate = true; m.geometry.computeVertexNormals()
+}
+function updateWrap() {
+  spineG.updateMatrix(); coverHinge.updateMatrix()
+  _fm[1].copy(spineG.matrix); _fm[2].multiplyMatrices(spineG.matrix, coverHinge.matrix)
+  updateRibbon(wrapIns); updateRibbon(sleeve)
+}
+function wrapTex() {
+  const { pts, total } = wrapIns.userData
+  const sA = pts[4].s, sB = pts[pts.length - 5].s // crease-A start, crease-B end
+  const P = PX, Wc = Math.round(total * P), Hc = FRONT_H
+  const [c, g] = ctx(Wc, Hc)
+  g.drawImage(backTex(), 0, 0, Math.round(sA * P), Hc)
+  g.drawImage(spineTex(), Math.round(sA * P), 0, Math.round((sB - sA) * P), Hc)
+  g.drawImage(frontTex(), Math.round(sB * P), 0, Wc - Math.round(sB * P), Hc)
+  return tex(c)
+}
+updateWrap()
 
 // Disc
 const R = 0.6, rH = 0.075, DT = 0.012
@@ -405,9 +447,9 @@ const FLOAT = new THREE.Vector3(0.15, 1.15, 0.55) // disc-focus hover point (wor
 disc.position.copy(seatWorld(_seat))
 
 loaded.then(() => {
-  frontPaper.map = frontTex(); backPaper.map = backTex(); spinePaper.map = spineTex()
+  wrapPaper.map = wrapTex()
   labelMat.map = discLabelTex(); bkPaper.map = bookletCoverTex()
-  ;[frontPaper, backPaper, spinePaper, labelMat, bkPaper].forEach((m) => (m.needsUpdate = true))
+  ;[wrapPaper, labelMat, bkPaper].forEach((m) => (m.needsUpdate = true))
 })
 
 // ---- State machine ----
@@ -421,7 +463,7 @@ let discFocus = false
 let focusDismissed = false
 let discSpin = 0 // user-driven extra rotation while browsing
 let resetT = 0
-const caseMats = [shellMat, trayMat, filmMat, frontPaper, backPaper, spinePaper, bookletMat, bkPaper]
+const caseMats = [shellMat, trayMat, filmMat, wrapPaper, bookletMat, bkPaper]
 
 function q(id) { return document.getElementById(id) }
 const ui = { bOpen: q('bOpen'), bDisc: q('bDisc'), bBrowse: q('bBrowse'), bReset: q('bReset'), lang: q('lang') }
@@ -478,6 +520,8 @@ function pressHubRelease() {
   if (outTarget || out > 0.5) { reseatDisc(); return }
   if (!openTarget || open < 0.65) return
   // Primary action: depress hub → retract teeth → lift disc → enter focus
+  reseating = false
+  releaseArmed = false
   hubPressTarget = 1
   syncUI()
 }
@@ -497,7 +541,7 @@ function reseatDisc() {
   discFocus = false
   focusDismissed = false
   outTarget = 0
-  hubPressTarget = 0
+  reseating = true
   syncUI()
 }
 ui.bOpen.onclick = toggleOpen
@@ -560,6 +604,8 @@ const clock = new THREE.Clock()
 const _lift = new THREE.Vector3()
 const _tmp = new THREE.Vector3()
 let releaseArmed = false
+let reseating = false
+let lastUiKey = ''
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05)
@@ -575,6 +621,8 @@ function tick() {
   if (hubPressTarget === 0) releaseArmed = false
 
   out = step(out, outTarget, dt, 1.05)
+  // disc back on the hub → let the sprung teeth re-expand
+  if (reseating && out < 0.01) { reseating = false; hubPressTarget = 0 }
 
   // Auto-enter disc focus once disc has lifted clear (unless user dismissed or screenshot mode)
   if (outTarget === 1 && out > 0.92 && !discFocus && !focusDismissed && !qs.has('shot')) {
@@ -586,6 +634,7 @@ function tick() {
   const oe = easeIO(open)
   spineG.rotation.y = -oe * HINGE_MAX / 2
   coverHinge.rotation.y = -oe * HINGE_MAX / 2
+  updateWrap()
 
   // Hub teeth retract radially + button sinks when pressed
   const pressE = easeIO(hubPress)
@@ -628,7 +677,6 @@ function tick() {
     if (hubPressTarget === 0 && hubPress > 0 && outTarget === 0) {
       // teeth already expanding via hubPress step
     }
-    if (outTarget === 0 && hubPressTarget !== 0 && out < 0.02) hubPressTarget = 0
   }
 
   // Dim case while browsing disc
@@ -675,8 +723,8 @@ function tick() {
     }
   }
 
-  const uiDirty = (open !== openTarget) || (out !== outTarget) || (hubPress !== hubPressTarget)
-  if (uiDirty || (outTarget === 1 && out > 0.9)) syncUI()
+  const uiKey = `${open > 0.65}|${openTarget}|${out > 0.02}|${out > 0.5}|${out > 0.85}|${outTarget}|${hubPressTarget}|${discFocus}`
+  if (uiKey !== lastUiKey) { lastUiKey = uiKey; syncUI() }
 
   controls.update()
   renderer.render(scene, camera)
@@ -685,6 +733,8 @@ renderer.setAnimationLoop(tick)
 document.addEventListener('visibilitychange', () => renderer.setAnimationLoop(document.hidden ? null : tick))
 addEventListener('pagehide', () => { renderer.setAnimationLoop(null); envRT.dispose(); renderer.dispose() })
 syncUI()
+window.__box = () => ({ open: +open.toFixed(2), hubPress: +hubPress.toFixed(2), out: +out.toFixed(2), discFocus })
+window.__hubScreen = () => { const v = new THREE.Vector3(); btn.getWorldPosition(v); v.project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] }
 
 // Query helpers for screenshots / deep links
 if (qs.has('open')) { openTarget = open = 1 }
