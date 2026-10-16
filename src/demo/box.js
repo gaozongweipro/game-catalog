@@ -66,10 +66,10 @@ const HALF = D / 2
 const LITE = mobile || qs.has('lite')
 // Translucent blue PP (n≈1.49). Desktop: real transmission; mobile: tuned alpha blend (cheaper, still see-through).
 const shellMat = LITE
-  ? new THREE.MeshPhysicalMaterial({ color: 0x2f6fe0, roughness: 0.18, metalness: 0, transparent: true, opacity: 0.42, ior: 1.49,
+  ? new THREE.MeshPhysicalMaterial({ color: 0x1546d6, roughness: 0.16, metalness: 0, transparent: true, opacity: 0.55, ior: 1.49,
       clearcoat: 0.5, clearcoatRoughness: 0.15, specularIntensity: 1, side: THREE.DoubleSide, depthWrite: false })
-  : new THREE.MeshPhysicalMaterial({ color: 0x6a9dff, roughness: 0.14, metalness: 0, transmission: 0.94, thickness: 0.011, ior: 1.49,
-      attenuationColor: new THREE.Color(0x1d5bdc), attenuationDistance: 0.09, clearcoat: 0.5, clearcoatRoughness: 0.12,
+  : new THREE.MeshPhysicalMaterial({ color: 0x3f72ff, roughness: 0.05, metalness: 0, transmission: 0.95, thickness: 0.011, ior: 1.49,
+      attenuationColor: new THREE.Color(0x0a32c8), attenuationDistance: 0.05, clearcoat: 0.5, clearcoatRoughness: 0.12,
       specularIntensity: 1, side: THREE.DoubleSide })
 const trayMat = shellMat.clone()
 trayMat.roughness = 0.2
@@ -105,24 +105,39 @@ function mesh(geo, mat, parent, cast = true) {
   const m = new THREE.Mesh(geo, mat); m.castShadow = cast; m.receiveShadow = true; parent.add(m); return m
 }
 /** U-shaped wall: top + bottom + opening (right) edge — spine side is open for the hinge. */
-function uWall(w, h, r, wall, depth, openLeft = true) {
+function uWall(w, h, r, wall, depth, openLeft = true, YC = 0.1) {
   const group = new THREE.Group()
-  const top = mesh(new THREE.BoxGeometry(w - (openLeft ? wall : 0), wall, depth), shellMat, group)
-  top.position.set(openLeft ? wall / 2 : 0, h / 2 - wall / 2, depth / 2)
-  const bot = mesh(new THREE.BoxGeometry(w - (openLeft ? wall : 0), wall, depth), shellMat, group)
-  bot.position.set(openLeft ? wall / 2 : 0, -h / 2 + wall / 2, depth / 2)
+  const top = mesh(new THREE.BoxGeometry(w - wall / 2, wall, depth), shellMat, group)
+  top.position.set(-wall / 4, h / 2 - wall / 2, depth / 2)
+  const bot = mesh(new THREE.BoxGeometry(w - wall / 2, wall, depth), shellMat, group)
+  bot.position.set(-wall / 4, -h / 2 + wall / 2, depth / 2)
+  // short spine-side wall stubs that end square at the fold (photo D: each half's wall stops at its crease)
+  for (const sy of [-1, 1]) {
+    const st = mesh(new THREE.BoxGeometry(wall, 0.09, depth * 0.85), shellMat, group, false)
+    st.position.set(-w / 2 + wall / 2, sy * (h / 2 - wall - 0.045), depth * 0.425)
+  }
   // Opening edge: one wall whose MATING edge has a shallow semicircular thumb scoop at mid-height.
   // Both halves carry the same scoop, so a closed case shows an oval finger recess (Amaray/Elite style).
-  const NW = 0.30, ND = Math.min(depth * 0.78, 0.05), hh = h / 2 - wall / 2
+  // Photo A: long stadium-shaped finger slot, ~1/3 of case height, slightly above centre, straddling the
+  // seam so each half carries half of it (total width ≈ 40 % of case thickness), with a moulded floor.
+  const NW = 0.56, ND = Math.min(depth * 0.95, HALF * 0.42), hh = h / 2 - wall / 2
   const prof = new THREE.Shape()
-  prof.moveTo(-hh, 0); prof.lineTo(hh, 0); prof.lineTo(hh, depth); prof.lineTo(NW / 2 + 0.02, depth)
-  prof.bezierCurveTo(NW / 2, depth, NW / 2 - 0.01, depth - ND, NW * 0.28, depth - ND)
-  prof.lineTo(-NW * 0.28, depth - ND)
-  prof.bezierCurveTo(-NW / 2 + 0.01, depth - ND, -NW / 2, depth, -NW / 2 - 0.02, depth)
+  prof.moveTo(-hh, 0); prof.lineTo(hh, 0); prof.lineTo(hh, depth); prof.lineTo(YC + NW / 2, depth)
+  prof.absarc(YC + NW / 2 - ND, depth, ND, 0, -Math.PI / 2, true)
+  prof.lineTo(YC - NW / 2 + ND, depth - ND)
+  prof.absarc(YC - NW / 2 + ND, depth, ND, -Math.PI / 2, -Math.PI, true)
   prof.lineTo(-hh, depth); prof.closePath()
   const og = new THREE.ExtrudeGeometry(prof, { depth: wall, bevelEnabled: false, curveSegments: 24 })
   og.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)))
   const ow = mesh(og, shellMat, group); ow.position.x = w / 2 - wall; ow.name = 'notchWall'
+  { // recess floor: thin stadium half-plate set ~3.5 mm in from the outer face
+    const fs = new THREE.Shape(); fs.moveTo(YC - NW / 2, depth); fs.lineTo(YC + NW / 2, depth)
+    fs.absarc(YC + NW / 2 - ND, depth, ND, 0, -Math.PI / 2, true); fs.lineTo(YC - NW / 2 + ND, depth - ND)
+    fs.absarc(YC - NW / 2 + ND, depth, ND, -Math.PI / 2, -Math.PI, true)
+    const fg = new THREE.ExtrudeGeometry(fs, { depth: wall * 0.45, bevelEnabled: false, curveSegments: 20 })
+    fg.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0)))
+    const fl = mesh(fg, shellMat, group, false); fl.position.x = w / 2 - wall * 1.2
+  }
   // rounded corner plugs on the opening edge
   for (const sy of [-1, 1]) {
     const c = mesh(new THREE.CylinderGeometry(wall / 2, wall / 2, depth, 16), shellMat, group, false)
@@ -250,9 +265,10 @@ lipB.rotation.y = Math.PI; lipB.position.z = -HALF
 const TRAY_Z = -HALF + T
 const DISC_Y = 0.08, DISC_X = 0.03
 const tray = new THREE.Group(); tray.position.set(0, 0, TRAY_Z); base.add(tray)
-for (let i = 0; i < 4; i++) {
-  const a = i * Math.PI / 2 + 0.28
-  mesh(arcSeg(0.608, 0.622, a, a + Math.PI / 2 - 0.56, 0.009), trayMat, tray).position.set(DISC_X, DISC_Y, 0)
+for (const [a0, a1] of [[0.32, Math.PI - 0.32], [Math.PI + 0.32, 2 * Math.PI - 0.32]]) {
+  mesh(arcSeg(0.606, 0.626, a0, a1, 0.014), trayMat, tray).position.set(DISC_X, DISC_Y, 0)
+  // shallow outer step like the moulded well in photo B
+  mesh(arcSeg(0.626, 0.648, a0 - 0.05, a1 + 0.05, 0.006), trayMat, tray, false).position.set(DISC_X, DISC_Y, 0)
 }
 const rib = new THREE.BoxGeometry(0.004, 0.16, 0.005)
 for (const [x, y, n] of [[-0.56, 0.72, 4], [0.5, 0.72, 4], [-0.56, -0.66, 4], [0.5, -0.66, 4]]) {
@@ -284,12 +300,12 @@ for (let i = 0; i < N; i++) {
 const btn = new THREE.Group(); hub.add(btn); btn.position.z = 0.012; btn.name = 'hubBtn'
 mesh(lathe([[0, 0.0105], [0.02, 0.0098], [0.034, 0.0082], [0.041, 0.006], [0.043, 0], [0.04, -0.012], [0, -0.012]]), trayMat, btn)
 { // embossed triangle motif + three radial flex slots
-  const tri = new THREE.Shape(), r1 = 0.021, r2 = 0.014
+  const tri = new THREE.Shape(), r1 = 0.03, r2 = 0.0225
   for (let k = 0; k < 3; k++) { const a = Math.PI / 2 + k * 2 * Math.PI / 3; k ? tri.lineTo(Math.cos(a) * r1, Math.sin(a) * r1) : tri.moveTo(Math.cos(a) * r1, Math.sin(a) * r1) }
   tri.closePath(); const hole = new THREE.Path()
   for (let k = 0; k < 3; k++) { const a = Math.PI / 2 - k * 2 * Math.PI / 3; k ? hole.lineTo(Math.cos(a) * r2, Math.sin(a) * r2) : hole.moveTo(Math.cos(a) * r2, Math.sin(a) * r2) }
   hole.closePath(); tri.holes.push(hole)
-  mesh(new THREE.ExtrudeGeometry(tri, { depth: 0.0018, bevelEnabled: false }), trayMat, btn, false).position.z = 0.0098
+  mesh(new THREE.ExtrudeGeometry(tri, { depth: 0.0026, bevelEnabled: true, bevelThickness: 0.0006, bevelSize: 0.0005, bevelSegments: 2 }), trayMat, btn, false).position.z = 0.0092
   const slotMat = new THREE.MeshStandardMaterial({ color: 0x0b2a78, roughness: 0.5, transparent: true, opacity: 0.55, depthWrite: false })
   for (let k = 0; k < 3; k++) { const sl = mesh(new THREE.BoxGeometry(0.003, 0.012, 0.002), slotMat, btn, false); const a = -Math.PI / 2 + k * 2 * Math.PI / 3; sl.position.set(Math.cos(a) * 0.033, Math.sin(a) * 0.033, 0.0085); sl.rotation.z = a + Math.PI / 2 }
 }
@@ -319,6 +335,9 @@ for (const y of [0.24, -0.24]) {
 for (const sy of [-1, 1]) {
   const l = mesh(new THREE.BoxGeometry(T * 0.9, 0.006, D - 2 * CR), shellMat, spineG, false)
   l.position.set(-T * 0.45, sy * (H / 2 - 0.006), D / 2)
+  // photo D: the strip carries its own small rectangular block at each end, standing inward between the folds
+  const blk = mesh(new THREE.BoxGeometry(T * 1.6, 0.05, D - 2 * CR - 0.012), shellMat, spineG, false)
+  blk.position.set(T * 0.8, sy * (H / 2 - 0.004 - 0.025), D / 2)
 }
 const coverHinge = new THREE.Group(); coverHinge.position.set(0, 0, D); spineG.add(coverHinge)
 const cover = new THREE.Group()
@@ -327,7 +346,7 @@ coverHinge.add(cover)
 
 const coverPlate = mesh(plate(W, H, RC, T), shellMat, cover)
 coverPlate.position.z = HALF - T // outer front face when closed
-const coverWalls = uWall(W - 0.004, H - 0.004, RC, T, HALF - T * 0.5, true)
+const coverWalls = uWall(W - 0.004, H - 0.004, RC, T, HALF - T * 0.5, true, -0.1)
 coverWalls.rotation.x = Math.PI // keep notch/side on opening edge (+x), mirror into −z
 coverWalls.position.z = HALF - T
 cover.add(coverWalls)
@@ -350,18 +369,20 @@ function bookletClip(parent, y) {
   // Real PS5/Elite case: a thin clear tab moulded off the opening-edge wall, lying parallel to the cover,
   // shaped like a rounded rectangular loop (window in the middle) — the booklet edge slides under it.
   const g = new THREE.Group(); parent.add(g)
-  const L = 0.085, Wt = 0.075, r = 0.02
+  const L = 0.15, Wt = 0.15, r = 0.025
   const s = new THREE.Shape()
   s.moveTo(0, -Wt / 2); s.lineTo(-L + r, -Wt / 2); s.quadraticCurveTo(-L, -Wt / 2, -L, -Wt / 2 + r)
   s.lineTo(-L, Wt / 2 - r); s.quadraticCurveTo(-L, Wt / 2, -L + r, Wt / 2); s.lineTo(0, Wt / 2); s.closePath()
-  { const hp = new THREE.Path(); hp.curves = rrect(0.045, 0.036, 0.012, -0.042, 0).curves; s.holes.push(hp) }
+  { const hp = new THREE.Path(); hp.curves = rrect(0.085, 0.09, 0.02, -0.08, 0).curves; s.holes.push(hp) }
   const tab = mesh(new THREE.ExtrudeGeometry(s, { depth: 0.0028, bevelEnabled: true, bevelThickness: 0.0008, bevelSize: 0.0008, bevelSegments: 2, curveSegments: 12 }), trayMat, g, false)
   tab.position.z = -0.0245; tab.rotation.y = -0.06 // slight downward lean toward the booklet
   const riser = mesh(new THREE.BoxGeometry(0.006, Wt, 0.023), trayMat, g, false); riser.position.set(0.001, 0, -0.0115)
   g.position.set(W / 2 - T - 0.002, y, HALF - T)
   return g
 }
-for (const y of [0.56, -0.56]) bookletClip(cover, y)
+for (const y of [0.62, -0.62]) bookletClip(cover, y)
+// thin raised rail along the opening edge on the cover interior (photo C)
+mesh(new THREE.BoxGeometry(0.006, H - 0.2, 0.006), trayMat, cover, false).position.set(W / 2 - T - 0.03, 0, HALF - T - 0.003)
 
 // Thin instruction booklet held under the clips
 const booklet = new THREE.Group(); cover.add(booklet)
@@ -449,13 +470,11 @@ function wrapInnerTex() {
   g.save(); g.translate(Wc, 0); g.scale(-1, 1) // mirror whole sheet: seen from inside the case
   // tray-side panel (behind disc) = left of sheet once mirrored
   const pw = Wc - xB
-  drawCover(g, 0, 0, pw, Hc, 2.4, 0.15, 0.55)
+  // cover interior: back-cover style layout (photo C); tray side: dim key art behind the disc (photo B)
+  g.drawImage(backTex(), 0, 0, pw, Hc)
   drawCover(g, Wc - xA, 0, xA, Hc, 1.9, 0.85, 0.3)
-  g.fillStyle = 'rgba(20,10,8,.35)'; g.fillRect(0, 0, Wc, Hc)
-  for (const [x0, w] of [[0, pw], [Wc - xA, xA]]) {
-    g.fillStyle = 'rgba(255,240,220,.92)'; g.font = '600 34px Arial'; g.textAlign = 'center'
-    g.fillText('REVERSE PRINT · 封面纸内侧印刷', x0 + w / 2, Hc - 60)
-  }
+  g.fillStyle = 'rgba(10,12,30,.4)'; g.fillRect(Wc - xA, 0, xA, Hc)
+  g.drawImage(spineTex(), pw, 0, Wc - xA - pw, Hc)
   g.restore(); return tex(c)
 }
 updateWrap()
@@ -800,3 +819,5 @@ if (qs.has('spin')) {
   disc.rotation.set(0.2, s, 0.1)
 }
 syncUI()
+if (qs.has('ajar')) { openTarget = open = Number(qs.get('ajar')) || 0.35 }
+if (qs.has('nobk')) booklet.visible = false
