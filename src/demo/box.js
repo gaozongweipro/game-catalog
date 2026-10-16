@@ -65,15 +65,15 @@ const HALF = D / 2
 
 const LITE = mobile || qs.has('lite')
 // Translucent blue PP (n≈1.49). Desktop: real transmission; mobile: tuned alpha blend (cheaper, still see-through).
-const shellMat = LITE
-  ? new THREE.MeshPhysicalMaterial({ color: 0x1546d6, roughness: 0.16, metalness: 0, transparent: true, opacity: 0.55, ior: 1.49,
-      clearcoat: 0.5, clearcoatRoughness: 0.15, specularIntensity: 1, side: THREE.DoubleSide, depthWrite: false })
-  : new THREE.MeshPhysicalMaterial({ color: 0x3f72ff, roughness: 0.05, metalness: 0, transmission: 0.95, thickness: 0.011, ior: 1.49,
-      attenuationColor: new THREE.Color(0x0a32c8), attenuationDistance: 0.05, clearcoat: 0.5, clearcoatRoughness: 0.12,
+const shellMat = true // v7: alpha-blended tint everywhere — transmission blurred the print seen through the shell
+  ? new THREE.MeshPhysicalMaterial({ color: 0x0636d8, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.46, ior: 1.49,
+      clearcoat: 0.4, clearcoatRoughness: 0.1, specularIntensity: 0.5, side: THREE.FrontSide, depthWrite: false })
+  : new THREE.MeshPhysicalMaterial({ color: 0x5f8cff, roughness: 0.015, metalness: 0, transmission: 1, thickness: 0.011, ior: 1.49,
+      attenuationColor: new THREE.Color(0x0a32c8), attenuationDistance: 0.16, clearcoat: 0.5, clearcoatRoughness: 0.12,
       specularIntensity: 1, side: THREE.DoubleSide })
 const trayMat = shellMat.clone()
-trayMat.roughness = 0.2
-if (LITE) trayMat.opacity = 0.5
+trayMat.roughness = 0.03
+trayMat.opacity = 0.42
 const filmMat = new THREE.MeshPhysicalMaterial({
   color: 0xffffff, roughness: 0.06, transmission: 1, thickness: 0.0004, ior: 1.49, metalness: 0, specularIntensity: 1, transparent: true, opacity: 1,
 })
@@ -275,6 +275,12 @@ for (const [x, y, n] of [[-0.56, 0.72, 4], [0.5, 0.72, 4], [-0.56, -0.66, 4], [0
   for (let i = 0; i < n; i++) mesh(rib, trayMat, tray, false).position.set(x + i * 0.018, y, 0.0025)
 }
 
+// shallow moulded corner tabs (photo B): small L-gussets in each inner corner of the tray half
+for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+  const cx = sx * (W / 2 - T - 0.03), cy = sy * (H / 2 - T - 0.03)
+  mesh(new THREE.BoxGeometry(0.06, 0.012, 0.012), trayMat, tray, false).position.set(cx, cy + sy * 0.012, 0.006)
+  mesh(new THREE.BoxGeometry(0.012, 0.06, 0.012), trayMat, tray, false).position.set(cx + sx * 0.012, cy, 0.006)
+}
 // Push-to-release "snowflake" hub (Amaray/Elite PS5 style):
 // low concentric support ring → raised collar → 12 flexible petals with outward lips → domed push button with △ motif
 const hub = new THREE.Group(); hub.position.set(DISC_X, DISC_Y, 0); tray.add(hub)
@@ -323,7 +329,7 @@ const strip = mesh(new THREE.BoxGeometry(T, H - 0.004, D - 2 * CR), shellMat, sp
 strip.position.set(-T / 2, 0, D / 2)
 // crease bands: thin flex webs (≈1/3 wall) sitting on the inner side, leaving visible grooves outside
 for (const zc of [CR / 2, D - CR / 2]) {
-  const web = mesh(new THREE.BoxGeometry(T * 0.38, H - 0.004, CR), shellMat, spineG, false)
+  const web = mesh(new THREE.BoxGeometry(T * 0.38, H - 0.004, CR), shellMat, spineG, false); web.visible = false
   web.position.set(-T * 0.19, 0, zc)
 }
 // mould gate dots on spine interior (two, upper/lower)
@@ -356,11 +362,15 @@ lip.position.z = HALF - T - 0.006
 
 // Opening-edge latch (right side when closed): recess + nub
 // Small snap tabs either side of the notch (functional, ~4 mm) + matching catch bumps on tray half
-for (const sy of [-1, 1]) {
-  const nub = mesh(new THREE.BoxGeometry(0.004, 0.04, 0.012), shellMat, cover, false)
-  nub.position.set(W / 2 - T - 0.004, sy * 0.2, HALF - T - 0.014)
-  const cb = mesh(new THREE.BoxGeometry(0.004, 0.04, 0.008), shellMat, base, false)
-  cb.position.set(W / 2 - T - 0.004, sy * 0.25, -HALF + T + 0.03)
+// Photo A (zoomed, user-refs/A-latch.png): below the slot, rectangular snap blocks moulded behind the
+// opening wall show through the plastic — a hook block on the cover half meeting a catch pocket on the tray half.
+for (const [y, h] of [[-0.3, 0.07], [-0.47, 0.05], [-0.62, 0.08], [0.58, 0.07]]) {
+  const hook = mesh(new THREE.BoxGeometry(0.012, h, 0.03), shellMat, cover, false)
+  hook.position.set(W / 2 - T - 0.007, y, -0.012)
+  const lipH = mesh(new THREE.BoxGeometry(0.006, h * 0.6, 0.008), shellMat, cover, false)
+  lipH.position.set(W / 2 - T - 0.016, y, -0.03)
+  const pocket = mesh(new THREE.BoxGeometry(0.012, h + 0.02, 0.026), shellMat, base, false)
+  pocket.position.set(W / 2 - T - 0.007, y, -HALF + T + 0.022)
 }
 
 // Booklet retainers — real keep-case style: moulded finger clips on INSIDE of front cover (left when open)
@@ -404,22 +414,22 @@ bkFace.position.z = -bkT / 2 - 0.0005
 const wrapPaper = paperMat(null); wrapPaper.side = THREE.DoubleSide
 const wrapInnerPaper = paperMat(null); wrapInnerPaper.side = THREE.DoubleSide
 const EDGE = 0.016 // insert stops ~1.6 mm short of the opening edge
-function wrapPath(o) {
+function wrapPath(o, xsBack, xsFront) {
   const pts = [] // {x,z,i,j,f}  frames: 0 base, 1 spine strip, 2 cover hinge
-  const xs = [W / 2 - EDGE, 0.2, -0.3, -W / 2 + 0.03, -W / 2]
+  const xs = xsBack || [W / 2 - EDGE, 0.2, -0.3, -W / 2 + 0.03, -W / 2]
   for (const x of xs) pts.push({ x, z: -HALF - o, i: 0, j: 0, f: 0 })
-  const N = 10
+  const N = 16
   for (let k = 1; k <= N; k++) { const t = (k / N) * Math.PI / 2; pts.push({ x: -W / 2 - (T + o) * Math.sin(t), z: -HALF - o * Math.cos(t), i: 0, j: 1, f: k / N }) }
   pts.push({ x: -W / 2 - T - o, z: HALF, i: 1, j: 1, f: 0 })
   for (let k = 1; k <= N; k++) { const t = (k / N) * Math.PI / 2; pts.push({ x: -W / 2 - (T + o) * Math.cos(t), z: HALF + o * Math.sin(t), i: 1, j: 2, f: k / N }) }
-  for (const x of [-W / 2 + 0.03, -0.3, 0.2, W / 2 - EDGE]) pts.push({ x, z: HALF + o, i: 2, j: 2, f: 0 })
+  for (const x of (xsFront || [-W / 2 + 0.03, -0.3, 0.2, W / 2 - EDGE])) pts.push({ x, z: HALF + o, i: 2, j: 2, f: 0 })
   let s = 0; pts.forEach((p, k) => { if (k) s += Math.hypot(p.x - pts[k - 1].x, p.z - pts[k - 1].z); p.s = s })
   return pts
 }
 const REST = [new THREE.Matrix4(), new THREE.Matrix4().makeTranslation(-W / 2, 0, -HALF), new THREE.Matrix4().makeTranslation(-W / 2, 0, HALF)]
 const REST_INV = REST.map((m) => m.clone().invert())
-function ribbon(o, h, mat) {
-  const pts = wrapPath(o), total = pts[pts.length - 1].s
+function ribbon(o, h, mat, xb, xf) {
+  const pts = wrapPath(o, xb, xf), total = pts[pts.length - 1].s
   const geo = new THREE.BufferGeometry()
   const pos = new Float32Array(pts.length * 2 * 3), uv = new Float32Array(pts.length * 2 * 2), idx = []
   pts.forEach((p, k) => {
@@ -435,6 +445,9 @@ function ribbon(o, h, mat) {
 const wrapIns = ribbon(0.0018, INS_H, wrapPaper)
 const wrapInner = ribbon(0.0011, INS_H, wrapInnerPaper)
 const sleeve = ribbon(0.0034, INS_H + 0.028, filmMat); sleeve.renderOrder = 2
+// Living-hinge plastic skins (outer face + thinned inner face of the flex band) — bend as smooth arcs
+const HX = [-W / 2 + 0.012, -W / 2], HXF = [-W / 2 + 0.012]
+const hingeSkins = [ribbon(0, H - 0.004, shellMat, HX, HXF), ribbon(-T * 0.62, H - 0.004, shellMat, HX, HXF)]
 const _fm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()], _va = new THREE.Vector3(), _vb = new THREE.Vector3()
 function updateRibbon(m) {
   const { pts, h } = m.userData, pos = m.geometry.attributes.position
@@ -447,7 +460,7 @@ function updateRibbon(m) {
 function updateWrap() {
   spineG.updateMatrix(); coverHinge.updateMatrix()
   _fm[1].copy(spineG.matrix); _fm[2].multiplyMatrices(spineG.matrix, coverHinge.matrix)
-  updateRibbon(wrapIns); updateRibbon(wrapInner); updateRibbon(sleeve)
+  updateRibbon(wrapIns); updateRibbon(wrapInner); updateRibbon(sleeve); hingeSkins.forEach(updateRibbon)
 }
 function wrapTex() {
   const { pts, total } = wrapIns.userData
@@ -744,7 +757,7 @@ function tick() {
 
   // Dim case while browsing disc
   const dim = discFocus ? 0.35 : 1
-  shellMat.opacity = 1 // physical mats use color intensity via env
+  // (v7) shell opacity left as configured
   scene.environmentIntensity = discFocus ? 0.55 : 0.9
   key.intensity = discFocus ? 1.2 : 2.05
   root.visible = true
@@ -821,3 +834,5 @@ if (qs.has('spin')) {
 syncUI()
 if (qs.has('ajar')) { openTarget = open = Number(qs.get('ajar')) || 0.35 }
 if (qs.has('nobk')) booklet.visible = false
+if (qs.has('nofilm')) sleeve.visible = false
+if (qs.has('noshell')) { shellMat.visible = false; trayMat.visible = false }
