@@ -6,6 +6,7 @@ import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLigh
 import { createCaseModel, platformSpec, W, H, D } from '../demo/caseModel.js'
 import { loadRE4 } from '../demo/art.js'
 import { db, uid, exportCollection, importCollection } from './db.js'
+import { searchCatalog, searchWiki, fetchImageBlob, loadCatalog, norm } from './lookup.js'
 import { TEMPLATES, templatesFor, NS_BAND, NS2_BAND, NS2_FRAME, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt } from './gen.js'
 import { BANNER } from '../demo/caseModel.js'
 
@@ -19,13 +20,13 @@ let lang = localStorage.getItem('game-catalog-lang') === 'en' ? 'en' : 'zh'
 const S = {
   zh: { brandT: '陈列柜', brandS: '我的电子实体版', vSpine: '书脊', vFront: '正面', makeT: '制作', loadT: '正在布置展柜…', emptyH: '展柜还是空的', emptyP: '上传封面，制作你的第一张电子实体版', emptyBtn: '开始制作',
     mExport: '导出收藏', mImport: '导入收藏', iBackT: '放回展柜', open: '打开', close: '合上', take: '取盘', put: '放回光盘', flip: '翻面', iEdit: '编辑', iLeft: '前移', iRight: '后移', iDel: '删除',
-    eNew: '制作电子实体版', eEdit: '编辑电子实体版', eCancel: '取消', eSave: '保存', lTitle: '游戏名称', lBand: '平台顶条', lKey: 'Game-Key Card（钥匙卡）', platNote: '', pn_ps5: 'PS5 蓝色 Blu-ray 盒 · 135×171×13.5 mm', pn_ns: 'Switch 透明盒 + 深灰卡带 · 105×170×11 mm', pn_ns2: 'Switch 2 半透红盒 + 红色卡带 · 105×170×11 mm', takeC: '取卡带', putC: '放回卡带', guideFrame: '红色边框', slotNote: '只需上传正面封面，其余会自动生成；点卡片可上传或裁切。',
+    eNew: '制作电子实体版', eEdit: '编辑电子实体版', eCancel: '取消', eSave: '保存', lTitle: '游戏名称', lBand: '平台标识', lKey: 'Game-Key Card（钥匙卡）', platNote: '', pn_ps5: 'PS5 蓝色 Blu-ray 盒 · 135×171×13.5 mm', pn_ns: 'Switch 透明盒 + 深灰卡带 · 105×170×11 mm', pn_ns2: 'Switch 2 半透红盒 + 红色卡带 · 105×170×11 mm', takeC: '取卡带', lkSearching: '正在搜索…', lkNone: '没有找到匹配，可上传封面，或直接保存（会根据名称生成封面）', lkWeb: '联网结果', lkCat: '目录', lkPick: '选一个自动填充封面与信息', lkFilled: '已自动填充：%s', lkFail: '封面下载失败，已保留其他信息', untitled: '未命名', putC: '放回卡带', guideFrame: '红色边框', slotNote: '全部可选：输入游戏名会自动联网查找封面并补全，未填的部分自动生成；点卡片可上传或裁切。',
     cHint: '拖动移动 · 双指或滚轮缩放', cReset: '重置', cReplace: '换图', cRemove: '移除', cDone: '完成', auto: '自动生成', uploaded: '已上传', required: '必填', back: '←',
     sample: '示例 · 我的实体收藏', made: '电子实体版', needTitle: '请填写游戏名称', needFront: '请上传正面封面', saved: '已保存到展柜', deleted: '已删除', delQ: '确定删除「%s」吗？', exported: '已导出', imported: '已导入 %d 项', badFile: '文件无法识别',
     sampleRO: '示例条目不能编辑', processing: '处理中…', guideBand: 'PS5 顶条区域', guideBleed: '出血线', hub: '中心孔', title: '3D 陈列柜 · 我的电子实体版' },
   en: { brandT: 'Showcase', brandS: 'My digital physical editions', vSpine: 'Spines', vFront: 'Fronts', makeT: 'Create', loadT: 'Setting up the cabinet…', emptyH: 'The cabinet is empty', emptyP: 'Upload a cover to make your first digital physical edition', emptyBtn: 'Get started',
     mExport: 'Export collection', mImport: 'Import collection', iBackT: 'Back to shelf', open: 'Open', close: 'Close', take: 'Take disc', put: 'Put disc back', flip: 'Flip', iEdit: 'Edit', iLeft: 'Move left', iRight: 'Move right', iDel: 'Delete',
-    eNew: 'New digital edition', eEdit: 'Edit digital edition', eCancel: 'Cancel', eSave: 'Save', lTitle: 'Game title', lBand: 'Platform band', lKey: 'Game-Key Card', platNote: '', pn_ps5: 'PS5 blue Blu-ray case · 135×171×13.5 mm', pn_ns: 'Switch clear case + dark-grey card · 105×170×11 mm', pn_ns2: 'Switch 2 translucent red case + red card · 105×170×11 mm', takeC: 'Take card', putC: 'Put card back', guideFrame: 'Red frame', slotNote: 'Only the front cover is required — the rest is generated. Tap a card to upload or crop.',
+    eNew: 'New digital edition', eEdit: 'Edit digital edition', eCancel: 'Cancel', eSave: 'Save', lTitle: 'Game title', lBand: 'Platform logo', lKey: 'Game-Key Card', platNote: '', pn_ps5: 'PS5 blue Blu-ray case · 135×171×13.5 mm', pn_ns: 'Switch clear case + dark-grey card · 105×170×11 mm', pn_ns2: 'Switch 2 translucent red case + red card · 105×170×11 mm', takeC: 'Take card', lkSearching: 'Searching…', lkNone: 'No match. Upload a cover or just save (a cover will be generated from the name)', lkWeb: 'Web', lkCat: 'Catalog', lkPick: 'Pick one to auto-fill cover and details', lkFilled: 'Auto-filled: %s', lkFail: 'Cover download failed; other details kept', untitled: 'Untitled', putC: 'Put card back', guideFrame: 'Red frame', slotNote: 'Everything is optional: type a game name to look up the cover online; anything left blank is generated. Tap a card to upload or crop.',
     cHint: 'Drag to move · pinch or scroll to zoom', cReset: 'Reset', cReplace: 'Replace', cRemove: 'Remove', cDone: 'Done', auto: 'Auto', uploaded: 'Uploaded', required: 'Required', back: '←',
     sample: 'Sample · my physical copy', made: 'Digital physical edition', needTitle: 'Please enter a title', needFront: 'Please upload a front cover', saved: 'Saved to the cabinet', deleted: 'Deleted', delQ: 'Delete “%s”?', exported: 'Exported', imported: 'Imported %d item(s)', badFile: 'Unrecognised file',
     sampleRO: 'The sample entry is read-only', processing: 'Processing…', guideBand: 'PS5 band', guideBleed: 'Bleed', hub: 'Hub', title: '3D Showcase · digital physical editions' },
@@ -420,8 +421,8 @@ function syncPlat() {
   $('keyWrap').classList.toggle('hidden', p !== 'ns2'); $('fKey').checked = !!draft.keyCard
   $('platNote').textContent = t('pn_' + p)
 }
-$('platSeg').onclick = (e) => {
-  const p = e.target.dataset?.p; if (!p || !draft || p === draft.platform) return
+$('platSeg').onclick = (e) => { const p = e.target.dataset?.p; if (!p || !draft || p === draft.platform) return; draft.platUser = true; setPlatform(p) }
+function setPlatform(p) {
   draft.platform = p; if (p !== 'ns2') draft.keyCard = false
   for (const k of SLOT_KEYS) if (draft.slots[k]?.crop) draft.slots[k].crop = { x: 0, y: 0, s: 1 } // aspect changed → reset framing
   const vis = model.disc.visible; useModel(p); model.disc.visible = vis
@@ -434,6 +435,7 @@ function openEditor(entry) {
   editing = entry || { id: null }
   draft = entry ? JSON.parse(JSON.stringify({ ...entry, slots: Object.fromEntries(Object.entries(entry.slots || {}).map(([k, v]) => [k, { crop: v.crop }])) })) : { title: '', platform: 'ps5', band: true, slots: {} }
   if (entry) for (const k of SLOT_KEYS) if (entry.slots?.[k]?.blob) draft.slots[k].blob = entry.slots[k].blob
+  lkResults = []; lkRender(null); loadCatalog()
   draftImgs = {}; draft.platform ||= 'ps5'; useModel(draft.platform); syncPlat()
   $('fTitle').value = draft.title || ''; $('fBand').checked = draft.band !== false
   $('eTitleH').textContent = entry ? t('eEdit') : t('eNew')
@@ -455,8 +457,8 @@ function scheduleArt() { if (artTimer) return; artTimer = setTimeout(() => { art
 function renderSlots() {
   const box = $('slots'); box.innerHTML = ''
   for (const k of SLOT_KEYS) {
-    const has = !!draft.slots[k]?.blob, el = document.createElement('button'); el.className = 'slot' + (k === 'front' && !has ? ' req' : '') + (has ? ' up' : ''); el.dataset.k = k
-    el.innerHTML = `<div class="th">${has || draftArt ? '' : '＋'}</div><b>${TPL()[k].label[lang === 'en' ? 1 : 0]}</b><i>${has ? t('uploaded') : k === 'front' ? t('required') : t('auto')}</i>`
+    const has = !!draft.slots[k]?.blob, el = document.createElement('button'); el.className = 'slot' + (has ? ' up' : ''); el.dataset.k = k
+    el.innerHTML = `<div class="th">${has || draftArt ? '' : '＋'}</div><b>${TPL()[k].label[lang === 'en' ? 1 : 0]}</b><i>${has ? (draft.slots[k].auto ? t('lkWeb') : t('uploaded')) : t('auto')}</i>`
     el.onclick = () => { if (!has) pickFile(k); else openCrop(k) }
     box.appendChild(el)
   }
@@ -466,7 +468,7 @@ function renderSlotThumbs() {
   if (!draftArt) return
   const map = { front: draftArt.front, spine: draftArt.spine, back: draftArt.back, inner: draftArt.innerCover, disc: draftArt.disc }
   for (const el of $('slots').children) {
-    const src = map[el.dataset.k], th = el.querySelector('.th'); if (!src || (el.dataset.k === 'front' && !draft.slots.front?.blob)) continue
+    const src = map[el.dataset.k], th = el.querySelector('.th'); if (!src) continue
     let c = th.querySelector('canvas'); if (!c) { th.textContent = ''; c = document.createElement('canvas'); th.appendChild(c) }
     const s = 160 / Math.max(src.width, src.height); c.width = Math.max(1, Math.round(src.width * s)); c.height = Math.max(1, Math.round(src.height * s)); c.getContext('2d').drawImage(src, 0, 0, c.width, c.height)
   }
@@ -478,14 +480,70 @@ $('fileIn').onchange = async (e) => {
   draft.slots[cropKey] = { blob, crop: { x: 0, y: 0, s: 1 } }; draftImgs[cropKey] = await blobToImage(blob)
   rebuildDraft(); renderSlots(); openCrop(cropKey)
 }
+// ---- name lookup: catalog first, then Wikipedia/Wikidata ----
+let lkSeq = 0, lkTimer = 0, lkResults = []
+function lkRender(state) {
+  const box = $('sugg'); box.classList.toggle('hidden', !state); if (!state) return
+  if (state === 'loading' && !lkResults.length) { box.innerHTML = `<div class="sg-msg">${t('lkSearching')}</div>`; return }
+  if (state === 'none') { box.innerHTML = `<div class="sg-msg">${t('lkNone')}</div>`; return }
+  box.innerHTML = `<div class="sg-msg">${t('lkPick')}${state === 'loading' ? ' · ' + t('lkSearching') : ''}</div>`
+  lkResults.forEach((r, i) => {
+    const b = document.createElement('button'); b.className = 'sg'; b.dataset.i = i
+    const pl = { ps5: 'PS5', ns: 'Switch', ns2: 'Switch 2' }[r.platform] || '—'
+    const sub = [r.src === 'catalog' ? t('lkCat') : t('lkWeb'), pl, r.date?.slice(0, 4), r.publisher].filter(Boolean).join(' · ')
+    b.innerHTML = `<span class="sg-th">${r.cover ? `<img alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}</span><span class="sg-t"><b></b><i></i></span>`
+    b.querySelector('b').textContent = r.title; b.querySelector('i').textContent = sub
+    const im = b.querySelector('img'); if (im) { im.src = r.cover; im.onerror = () => { im.onerror = null; im.src = `https://wsrv.nl/?url=${encodeURIComponent(r.cover.replace(/^https?:\/\//, ''))}&w=120` } }
+    b.onclick = () => applyLookup(r, true); box.appendChild(b)
+  })
+}
+async function runLookup(q) {
+  const seq = ++lkSeq; q = q.trim(); if (norm(q).length < 2) { lkResults = []; lkRender(null); return }
+  lkRender('loading')
+  const cat = await searchCatalog(q, 6); if (seq !== lkSeq) return
+  lkResults = cat; lkRender(cat.length ? 'loading' : 'loading')
+  const web = (cat[0]?.score || 0) >= 0.92 && cat.length >= 3 ? [] : await searchWiki(q, 4).catch(() => [])
+  if (seq !== lkSeq) return
+  const seen = new Set(cat.map((r) => norm(r.titles.en || r.title)))
+  lkResults = [...cat, ...web.filter((r) => !seen.has(norm(r.titles.en || r.title)))].slice(0, 8)
+  lkRender(lkResults.length ? 'done' : 'none')
+}
+/** Fill whatever the user left blank from a lookup result. */
+async function applyLookup(r, picked) {
+  lkRender(null); const filled = []
+  if (picked || !$('fTitle').value.trim()) { $('fTitle').value = r.title; filled.push('title') }
+  if (r.platform && r.platform !== draft.platform && (picked || !draft.platUser)) { setPlatform(r.platform); filled.push('platform') }
+  draft.lookup = { src: r.src, titles: r.titles, wiki: r.wiki || null, cover: r.cover || null }
+  if (r.cover && !draft.slots.front?.blob) {
+    toast(t('processing')); const raw = await fetchImageBlob(r.cover)
+    if (raw) {
+      const blob = await downscale(raw, 1600), img = await blobToImage(blob)
+      // package scans (portrait, already carry platform branding) → no generated band/badge, trim the scan border
+      const scan = img && img.height / img.width > 1.3
+      draft.slots.front = { blob, crop: { x: 0, y: 0, s: scan ? 1.04 : 1 }, auto: true }; draftImgs.front = img
+      if (scan) { draft.band = false; $('fBand').checked = false }
+      filled.push('cover')
+    } else toast(t('lkFail'))
+  }
+  rebuildDraft(); renderSlots(); if (filled.length) toast(t('lkFilled').replace('%s', filled.join(' / ')))
+  return filled
+}
+$('fTitle').addEventListener('input', () => { clearTimeout(lkTimer); lkTimer = setTimeout(() => runLookup($('fTitle').value), 350) })
+$('fTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter' && lkResults[0]) { e.preventDefault(); applyLookup(lkResults[0], true) } })
 $('fTitle').oninput = scheduleArt; $('fBand').onchange = scheduleArt
 $('eCancel').onclick = () => closeEditor(false)
 $('eSave').onclick = async () => {
   draft.title = $('fTitle').value.trim()
-  if (!draft.title) { toast(t('needTitle')); $('fTitle').focus(); return }
-  if (!draft.slots.front?.blob) { toast(t('needFront')); return }
+  // everything is optional: name-only → use the best catalog match if it is confident; otherwise a generated cover
+  if (draft.title && !draft.slots.front?.blob && !draft.lookup) {
+    const best = (await searchCatalog(draft.title, 1))[0]
+    if (best && best.score >= 0.85) await applyLookup(best, false)
+    draft.title = $('fTitle').value.trim()
+  }
+  if (!draft.title) draft.title = t('untitled')
+  draft.band = $('fBand').checked
   const isNew = !editing.id
-  const e = { id: editing.id || uid(), title: draft.title, platform: draft.platform || 'ps5', keyCard: draft.platform === 'ns2' && !!draft.keyCard, band: draft.band, slots: draft.slots, createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(), order: isNew ? entries.length : editing.order }
+  const e = { id: editing.id || uid(), title: draft.title, platform: draft.platform || 'ps5', keyCard: draft.platform === 'ns2' && !!draft.keyCard, lookup: draft.lookup || null, band: draft.band, slots: draft.slots, createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(), order: isNew ? entries.length : editing.order }
   await db.put(e)
   if (isNew) entries.push(e); else entries[entries.findIndex((x) => x.id === e.id)] = e
   artCache.set(e.id, draftArt); if (!isNew) await refreshProxy(e); else artCache.set(e.id, draftArt)
@@ -509,7 +567,7 @@ function openCrop(k) {
   cropKey = k; cropImg = draftImgs[k]; if (!cropImg) return pickFile(k)
   cropState = draft.slots[k].crop ||= { x: 0, y: 0, s: 1 }
   $('crop').classList.remove('hidden'); $('cTitle').textContent = TPL()[k].label[lang === 'en' ? 1 : 0]
-  $('cZoom').value = cropState.s; $('cRemove').disabled = k === 'front'
+  $('cZoom').value = cropState.s; $('cRemove').disabled = false
   requestAnimationFrame(drawCrop)
 }
 function drawCrop() {
@@ -539,7 +597,8 @@ function drawCrop() {
   } else if (draft.platform === 'ns' || draft.platform === 'ns2') {
     const two = draft.platform === 'ns2', bh = two ? NS2_BAND : NS_BAND, gc = 'rgba(230,0,18,.55)'
     if (T.band && $('fBand').checked) {
-      cg.fillStyle = gc; cg.fillRect(0, 0, T.w, bh); cg.fillStyle = '#fff'; cg.font = `600 ${Math.min(30, 14 / sc)}px sans-serif`; cg.fillText(cropKey === 'spine' ? (two ? 'NS2' : 'NS') : t('guideBand'), 12, bh / 2 + 6)
+      if (!two) { if (cropKey === 'front') { cg.fillStyle = gc; cg.fillRect(0, 0, bh, bh); cg.fillStyle = '#fff'; cg.font = `600 ${Math.min(26, 13 / sc)}px sans-serif`; cg.fillText('LOGO', 10, bh / 2 + 6) } }
+      else { cg.fillStyle = gc; cg.fillRect(0, 0, T.w, bh); cg.fillStyle = '#fff'; cg.font = `600 ${Math.min(30, 14 / sc)}px sans-serif`; cg.fillText(cropKey === 'spine' ? 'NS2' : t('guideBand'), 12, bh / 2 + 6) }
       if (two && cropKey !== 'spine') { const F = NS2_FRAME; cg.fillStyle = gc; cg.fillRect(0, bh, F, T.h - bh); cg.fillRect(T.w - F, bh, F, T.h - bh); cg.fillRect(0, T.h - F, T.w, F); if (cropKey === 'front' && draft.keyCard) { cg.fillStyle = 'rgba(255,255,255,.8)'; cg.fillRect(F, T.h - F - 92, T.w - 2 * F, 92) } }
     }
     cg.strokeStyle = 'rgba(217,137,63,.95)'; cg.lineWidth = lw; cg.setLineDash([12 / sc, 9 / sc]); cg.strokeRect(BLEED, BLEED, T.w - 2 * BLEED, T.h - 2 * BLEED); cg.setLineDash([])
@@ -566,7 +625,7 @@ function setZoom(s) { cropState.s = THREE.MathUtils.clamp(s, 1, 4); $('cZoom').v
 $('cZoom').oninput = (e) => setZoom(+e.target.value)
 $('cReset').onclick = () => { Object.assign(cropState, { x: 0, y: 0, s: 1 }); $('cZoom').value = 1; drawCrop(); scheduleArt() }
 $('cReplace').onclick = () => pickFile(cropKey)
-$('cRemove').onclick = () => { if (cropKey === 'front') return; delete draft.slots[cropKey]; draftImgs[cropKey] = null; $('crop').classList.add('hidden'); rebuildDraft(); renderSlots() }
+$('cRemove').onclick = () => { delete draft.slots[cropKey]; draftImgs[cropKey] = null; $('crop').classList.add('hidden'); rebuildDraft(); renderSlots() }
 $('cDone').onclick = () => { $('crop').classList.add('hidden'); rebuildDraft(); renderSlots() }
 addEventListener('resize', () => { if (!$('crop').classList.contains('hidden')) drawCrop() })
 
@@ -588,7 +647,7 @@ async function boot() {
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { entries: () => entries.map((e) => e.title), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  window.__sc = { entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 boot()

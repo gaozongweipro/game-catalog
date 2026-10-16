@@ -21,7 +21,8 @@ const NS_TPL = {
 }
 export function templatesFor(platform) { return platform === 'ns' || platform === 'ns2' ? NS_TPL : TEMPLATES }
 export const NS_RED = '#e60012'
-export const NS_BAND = 108 // NS1 top band ≈ 13.5 mm
+export const NS_BAND = 176 // NS1: no band — 22 × 22 mm red logo badge flush with the top-left corner (logo 16 mm); kept as guide size
+export const NS_BADGE = 176
 export const NS2_FRAME = 16, NS2_BAND = 128
 /** Nintendo Switch mark: two Joy-Con halves (left outline + dot, right solid + hole). Draw at x,y (top-left), height h. */
 export function nsIcon(g, x, y, h, col = '#fff') {
@@ -47,6 +48,27 @@ export function ns2Logo(g, cx, y, h, col = '#fff') {
   nsIcon(g, cx - tw / 2, y, h, col); g.fillStyle = col; g.textBaseline = 'alphabetic'; g.fillText('2', cx - tw / 2 + iw + gap, y + h * 0.99)
   g.font = `700 ${h * 0.3}px Arial,sans-serif`; g.textAlign = 'center'; g.fillText('NINTENDO', cx, y + h * 1.36); g.fillText('SWITCH', cx, y + h * 1.68); g.restore()
 }
+/** NS1 front badge (real covers, e.g. Bendy: Lone Wolf JP): red #e60012 square at the top-left corner, white Joy-Con icon over NINTENDO / SWITCH. */
+export function nsBadge(g, x, y, s) {
+  g.save(); g.fillStyle = NS_RED; g.fillRect(x, y, s, s)
+  const ih = s * 0.42; nsIcon(g, x + (s - ih * 0.94) / 2, y + s * 0.13, ih)
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.font = `700 ${s * 0.1}px Arial,sans-serif`; g.fillText('NINTENDO', x + s / 2, y + s * 0.71)
+  g.font = `900 ${s * 0.155}px Arial Black,Arial,sans-serif`; g.fillText('SWITCH', x + s / 2, y + s * 0.87)
+  g.font = `400 ${s * 0.05}px Arial`; g.fillText('™', x + s * 0.88, y + s * 0.8); g.restore()
+}
+/** Placeholder cover when nothing is uploaded or found: hue from the title, big typographic title. */
+export function placeholderArt(g, w, h, title) {
+  let hsh = 0; for (const ch of title || '?') hsh = (hsh * 31 + ch.codePointAt(0)) >>> 0
+  const hue = hsh % 360, gr = g.createLinearGradient(0, 0, w * 0.4, h)
+  gr.addColorStop(0, `hsl(${hue},45%,34%)`); gr.addColorStop(1, `hsl(${(hue + 40) % 360},55%,14%)`); g.fillStyle = gr; g.fillRect(0, 0, w, h)
+  g.save(); g.globalAlpha = 0.14; g.strokeStyle = '#fff'; g.lineWidth = 2
+  for (let i = 0; i < 9; i++) { g.beginPath(); g.arc(w * 0.78, h * 0.3, w * (0.12 + i * 0.09), 0, 7); g.stroke() } g.restore()
+  const t = title || 'Untitled', M = w * 0.09; g.fillStyle = '#fff'; g.textBaseline = 'alphabetic'
+  const size = fitFont(g, t, w - 2 * M, Math.round(w * 0.13), 900); const lines = []
+  if (size < w * 0.07 && t.length > 6) { const mid = Math.ceil(t.length / 2); lines.push(t.slice(0, mid), t.slice(mid)); fitFont(g, lines[0], w - 2 * M, Math.round(w * 0.11), 900) } else lines.push(t)
+  lines.forEach((l, i) => g.fillText(l, M, h * 0.62 + i * w * 0.12))
+  g.fillStyle = 'rgba(255,255,255,.7)'; g.fillRect(M, h * 0.66 + (lines.length - 1) * w * 0.12, w * 0.18, 4)
+}
 function keyIcon(g, x, y, s, fg = '#fff', bg = NS_RED) {
   g.save(); g.fillStyle = bg; g.beginPath(); g.arc(x, y, s, 0, 7); g.fill(); g.strokeStyle = fg; g.fillStyle = fg; g.lineWidth = s * 0.18
   g.beginPath(); g.arc(x - s * 0.28, y, s * 0.28, 0, 7); g.stroke(); g.fillRect(x - s * 0.02, y - s * 0.09, s * 0.62, s * 0.18); g.fillRect(x + s * 0.32, y, s * 0.12, s * 0.3); g.fillRect(x + s * 0.48, y, s * 0.1, s * 0.22); g.restore()
@@ -59,7 +81,7 @@ function keyNotice(g, x, y, w, h) {
 }
 function nsFrontDeco(g, w, h, platform, keyCard) {
   if (platform === 'ns') {
-    g.fillStyle = NS_RED; g.fillRect(0, 0, w, NS_BAND); nsLogo(g, 34, NS_BAND * 0.24, NS_BAND * 0.52); ratingBox(g, 30, h - 150, 120)
+    nsBadge(g, 0, 0, NS_BADGE); ratingBox(g, 30, h - 150, 120)
   } else {
     const F = NS2_FRAME; g.fillStyle = NS_RED; g.fillRect(0, 0, w, NS2_BAND); g.fillRect(0, 0, F, h); g.fillRect(w - F, 0, F, h); g.fillRect(0, h - F, w, F)
     ns2Logo(g, w / 2, NS2_BAND * 0.12, NS2_BAND * 0.46)
@@ -113,7 +135,7 @@ export function genFront(img, crop, title, band = true, platform = 'ps5', keyCar
   const c = canvas(T.w, T.h), g = c.getContext('2d')
   g.fillStyle = '#1b1d22'; g.fillRect(0, 0, c.width, c.height)
   if (img) drawCropped(g, img, c.width, c.height, crop)
-  else { g.fillStyle = '#e9eef0'; g.font = '700 54px sans-serif'; g.textAlign = 'center'; g.fillStyle = '#7b8a87'; g.fillText(title || '封面', c.width / 2, c.height / 2) }
+  else placeholderArt(g, c.width, c.height, title)
   if (band) platform === 'ps5' ? banner(g, c.width) : nsFrontDeco(g, c.width, c.height, platform, keyCard)
   return c
 }
@@ -121,15 +143,15 @@ function nsSpine(img, crop, title, color, band, platform) {
   const T = NS_TPL.spine, c = canvas(T.w, T.h), g = c.getContext('2d'), two = platform === 'ns2'
   if (img) drawCropped(g, img, c.width, c.height, crop)
   else {
-    if (two) { const col = color || [40, 46, 56]; const gr = g.createLinearGradient(0, 0, 0, c.height); gr.addColorStop(0, rgb(col)); gr.addColorStop(1, rgb(col.map((v) => v * 0.55))); g.fillStyle = gr } else g.fillStyle = '#fafafa'
+    if (two) { const col = color || [40, 46, 56]; const gr = g.createLinearGradient(0, 0, 0, c.height); gr.addColorStop(0, rgb(col)); gr.addColorStop(1, rgb(col.map((v) => v * 0.55))); g.fillStyle = gr } else g.fillStyle = NS_RED
     g.fillRect(0, 0, c.width, c.height)
-    g.save(); g.translate(c.width / 2, (two ? NS2_BAND : NS_BAND) + 40); g.rotate(Math.PI / 2); g.fillStyle = two ? '#fff' : '#111'; g.textBaseline = 'middle'
-    fitFont(g, title || 'Untitled', c.height - 420, 44); g.fillText(title || 'Untitled', 0, 2); g.restore()
-    g.fillStyle = two ? 'rgba(255,255,255,.8)' : '#666'; g.font = '700 14px Arial'; g.textAlign = 'center'; g.fillText('DIGITAL', c.width / 2, c.height - 70); g.fillText('PHYSICAL', c.width / 2, c.height - 52)
+    g.save(); g.translate(c.width / 2, two ? NS2_BAND + 40 : 130); g.rotate(Math.PI / 2); g.fillStyle = '#fff'; g.textBaseline = 'middle'
+    fitFont(g, title || 'Untitled', c.height - 300, 40, two ? 800 : 700); g.fillText(title || 'Untitled', 0, 2); g.restore()
+    if (two) { g.fillStyle = 'rgba(255,255,255,.8)'; g.font = '700 14px Arial'; g.textAlign = 'center'; g.fillText('DIGITAL', c.width / 2, c.height - 70); g.fillText('PHYSICAL', c.width / 2, c.height - 52) }
   }
   if (band) {
-    const bh = two ? NS2_BAND : NS_BAND; g.fillStyle = NS_RED; g.fillRect(0, 0, c.width, bh)
-    nsIcon(g, c.width / 2 - 21, bh * 0.22, 44)
+    const bh = two ? NS2_BAND : 0; if (two) { g.fillStyle = NS_RED; g.fillRect(0, 0, c.width, bh) }
+    nsIcon(g, c.width / 2 - 21, two ? bh * 0.22 : 40, 44)
     if (two) { g.fillStyle = '#fff'; g.font = '900 30px Arial Black,Arial'; g.textAlign = 'center'; g.fillText('2', c.width / 2, bh * 0.9) ; g.fillStyle = NS_RED; g.fillRect(0, c.height - NS2_FRAME, c.width, NS2_FRAME) }
   }
   return c
@@ -175,19 +197,19 @@ export function genBack(img, crop, cover, title, color, band = true, platform = 
 }
 function nsBack(img, crop, cover, title, color, band, platform) {
   const T = NS_TPL.back, c = canvas(T.w, T.h), g = c.getContext('2d'), two = platform === 'ns2'
-  const bh = band ? (two ? NS2_BAND : NS_BAND) : 0, F = two && band ? NS2_FRAME : 0
-  const deco = () => { if (!band) return; g.fillStyle = NS_RED; g.fillRect(0, 0, c.width, bh); if (two) { g.fillRect(0, 0, F, c.height); g.fillRect(c.width - F, 0, F, c.height); g.fillRect(0, c.height - F, c.width, F) } const lh = bh * 0.5; if (two) ns2Logo(g, c.width / 2, bh * 0.12, bh * 0.46); else nsLogo(g, c.width - 300, bh * 0.24, lh) }
+  const bh = band && two ? NS2_BAND : 0, F = two && band ? NS2_FRAME : 0
+  const deco = () => { if (!band) return; g.fillStyle = NS_RED; g.fillRect(0, 0, c.width, bh); if (two) { g.fillRect(0, 0, F, c.height); g.fillRect(c.width - F, 0, F, c.height); g.fillRect(0, c.height - F, c.width, F) } const lh = bh * 0.5; if (two) ns2Logo(g, c.width / 2, bh * 0.12, bh * 0.46); else nsLogo(g, c.width - 290, 40, 56, false, NS_RED) }
   if (img) { drawCropped(g, img, c.width, c.height, crop); deco(); return c }
   g.fillStyle = two ? '#16181d' : '#f4f4f4'; g.fillRect(0, 0, c.width, c.height)
   const M = 48 + F, ink = two ? '#fff' : '#111'
   if (cover && two) { g.save(); g.filter = 'blur(26px)'; g.globalAlpha = 0.45; drawCropped(g, cover, c.width, c.height, { s: 1.3 }); g.restore() }
-  g.fillStyle = ink; fitFont(g, title || 'Untitled', c.width - 2 * M, 54, 800); g.fillText(title || 'Untitled', M, bh + 90)
-  g.fillStyle = two ? 'rgba(255,255,255,.8)' : '#444'; g.font = '400 22px "Noto Sans SC",Arial,sans-serif'; wrapText(g, '电子实体版 · Digital Physical Edition', M, bh + 132, c.width - 2 * M, 30)
+  g.fillStyle = ink; fitFont(g, title || 'Untitled', c.width - 2 * M, 54, 800); g.fillText(title || 'Untitled', M, Math.max(bh, 110) + 90)
+  g.fillStyle = two ? 'rgba(255,255,255,.8)' : '#444'; g.font = '400 22px "Noto Sans SC",Arial,sans-serif'; wrapText(g, '电子实体版 · Digital Physical Edition', M, Math.max(bh, 110) + 132, c.width - 2 * M, 30)
   if (cover) {
     const sw = (c.width - 2 * M - 16) / 2, sh = sw * 0.5625
     ;[[1.8, -0.4, -0.3], [2.2, 0.5, 0.1], [1.6, 0, 0.5], [2.0, -0.3, 0.4]].forEach(([s2, x, y], i) => {
       const t = canvas(Math.round(sw), Math.round(sh)); drawCropped(t.getContext('2d'), cover, t.width, t.height, { s: s2, x, y })
-      const px = M + (i % 2) * (sw + 16), py = bh + 190 + Math.floor(i / 2) * (sh + 16); g.drawImage(t, px, py)
+      const px = M + (i % 2) * (sw + 16), py = Math.max(bh, 110) + 190 + Math.floor(i / 2) * (sh + 16); g.drawImage(t, px, py)
     })
   }
   const wy = c.height - F - 200; g.fillStyle = '#fff'; g.fillRect(F, wy, c.width - 2 * F, 200 - (two ? 0 : 0))

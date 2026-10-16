@@ -46,7 +46,8 @@
   <div class="grab"></div>
   <div class="ehead"><h2 id="eTitleH">制作电子实体版</h2><button class="ghost" id="eCancel">取消</button><button class="primary" id="eSave">保存</button></div>
   <div class="ebody" id="ebody">
-    <label class="field"><span id="lTitle">游戏名称</span><input id="fTitle" maxlength="60" placeholder="例如：我的游戏" /></label>
+    <label class="field"><span id="lTitle">游戏名称</span><input id="fTitle" maxlength="80" autocomplete="off" placeholder="中 / 日 / 英文游戏名，可选" /></label>
+    <div class="sugg hidden" id="sugg"></div>
     <div class="row">
       <div class="seg plat" id="platSeg"><button aria-pressed="true" data-p="ps5">PS5</button><button aria-pressed="false" data-p="ns">Switch</button><button aria-pressed="false" data-p="ns2">Switch 2</button></div>
       <label class="switch"><input type="checkbox" id="fBand" checked /><span id="lBand">PS5 顶条</span></label>
