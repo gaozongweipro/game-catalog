@@ -48,10 +48,11 @@
   <div class="ebody" id="ebody">
     <label class="field"><span id="lTitle">游戏名称</span><input id="fTitle" maxlength="60" placeholder="例如：我的游戏" /></label>
     <div class="row">
-      <div class="seg plat" id="platSeg"><button aria-pressed="true" data-p="ps5">PS5</button><button disabled data-p="ns">Switch</button><button disabled data-p="ns2">Switch 2</button></div>
+      <div class="seg plat" id="platSeg"><button aria-pressed="true" data-p="ps5">PS5</button><button aria-pressed="false" data-p="ns">Switch</button><button aria-pressed="false" data-p="ns2">Switch 2</button></div>
       <label class="switch"><input type="checkbox" id="fBand" checked /><span id="lBand">PS5 顶条</span></label>
+      <label class="switch hidden" id="keyWrap"><input type="checkbox" id="fKey" /><span id="lKey">Game-Key Card</span></label>
     </div>
-    <p class="note" id="platNote">Switch / Switch 2 模板即将支持</p>
+    <p class="note" id="platNote"></p>
     <div class="slots" id="slots"></div>
     <p class="note" id="slotNote">只需上传正面封面，其余会自动生成；点卡片可上传或裁切。</p>
   </div>

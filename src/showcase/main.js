@@ -3,10 +3,10 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js'
-import { createCaseModel, W, H, D } from '../demo/caseModel.js'
+import { createCaseModel, platformSpec, W, H, D } from '../demo/caseModel.js'
 import { loadRE4 } from '../demo/art.js'
 import { db, uid, exportCollection, importCollection } from './db.js'
-import { TEMPLATES, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt } from './gen.js'
+import { TEMPLATES, templatesFor, NS_BAND, NS2_BAND, NS2_FRAME, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt } from './gen.js'
 import { BANNER } from '../demo/caseModel.js'
 
 const BASE = import.meta.env.BASE_URL
@@ -19,13 +19,13 @@ let lang = localStorage.getItem('game-catalog-lang') === 'en' ? 'en' : 'zh'
 const S = {
   zh: { brandT: '陈列柜', brandS: '我的电子实体版', vSpine: '书脊', vFront: '正面', makeT: '制作', loadT: '正在布置展柜…', emptyH: '展柜还是空的', emptyP: '上传封面，制作你的第一张电子实体版', emptyBtn: '开始制作',
     mExport: '导出收藏', mImport: '导入收藏', iBackT: '放回展柜', open: '打开', close: '合上', take: '取盘', put: '放回光盘', flip: '翻面', iEdit: '编辑', iLeft: '前移', iRight: '后移', iDel: '删除',
-    eNew: '制作电子实体版', eEdit: '编辑电子实体版', eCancel: '取消', eSave: '保存', lTitle: '游戏名称', lBand: 'PS5 顶条', platNote: 'Switch / Switch 2 模板即将支持', slotNote: '只需上传正面封面，其余会自动生成；点卡片可上传或裁切。',
+    eNew: '制作电子实体版', eEdit: '编辑电子实体版', eCancel: '取消', eSave: '保存', lTitle: '游戏名称', lBand: '平台顶条', lKey: 'Game-Key Card（钥匙卡）', platNote: '', pn_ps5: 'PS5 蓝色 Blu-ray 盒 · 135×171×13.5 mm', pn_ns: 'Switch 透明盒 + 深灰卡带 · 105×170×11 mm', pn_ns2: 'Switch 2 半透红盒 + 红色卡带 · 105×170×11 mm', takeC: '取卡带', putC: '放回卡带', guideFrame: '红色边框', slotNote: '只需上传正面封面，其余会自动生成；点卡片可上传或裁切。',
     cHint: '拖动移动 · 双指或滚轮缩放', cReset: '重置', cReplace: '换图', cRemove: '移除', cDone: '完成', auto: '自动生成', uploaded: '已上传', required: '必填', back: '←',
     sample: '示例 · 我的实体收藏', made: '电子实体版', needTitle: '请填写游戏名称', needFront: '请上传正面封面', saved: '已保存到展柜', deleted: '已删除', delQ: '确定删除「%s」吗？', exported: '已导出', imported: '已导入 %d 项', badFile: '文件无法识别',
     sampleRO: '示例条目不能编辑', processing: '处理中…', guideBand: 'PS5 顶条区域', guideBleed: '出血线', hub: '中心孔', title: '3D 陈列柜 · 我的电子实体版' },
   en: { brandT: 'Showcase', brandS: 'My digital physical editions', vSpine: 'Spines', vFront: 'Fronts', makeT: 'Create', loadT: 'Setting up the cabinet…', emptyH: 'The cabinet is empty', emptyP: 'Upload a cover to make your first digital physical edition', emptyBtn: 'Get started',
     mExport: 'Export collection', mImport: 'Import collection', iBackT: 'Back to shelf', open: 'Open', close: 'Close', take: 'Take disc', put: 'Put disc back', flip: 'Flip', iEdit: 'Edit', iLeft: 'Move left', iRight: 'Move right', iDel: 'Delete',
-    eNew: 'New digital edition', eEdit: 'Edit digital edition', eCancel: 'Cancel', eSave: 'Save', lTitle: 'Game title', lBand: 'PS5 band', platNote: 'Switch / Switch 2 templates coming soon', slotNote: 'Only the front cover is required — the rest is generated. Tap a card to upload or crop.',
+    eNew: 'New digital edition', eEdit: 'Edit digital edition', eCancel: 'Cancel', eSave: 'Save', lTitle: 'Game title', lBand: 'Platform band', lKey: 'Game-Key Card', platNote: '', pn_ps5: 'PS5 blue Blu-ray case · 135×171×13.5 mm', pn_ns: 'Switch clear case + dark-grey card · 105×170×11 mm', pn_ns2: 'Switch 2 translucent red case + red card · 105×170×11 mm', takeC: 'Take card', putC: 'Put card back', guideFrame: 'Red frame', slotNote: 'Only the front cover is required — the rest is generated. Tap a card to upload or crop.',
     cHint: 'Drag to move · pinch or scroll to zoom', cReset: 'Reset', cReplace: 'Replace', cRemove: 'Remove', cDone: 'Done', auto: 'Auto', uploaded: 'Uploaded', required: 'Required', back: '←',
     sample: 'Sample · my physical copy', made: 'Digital physical edition', needTitle: 'Please enter a title', needFront: 'Please upload a front cover', saved: 'Saved to the cabinet', deleted: 'Deleted', delQ: 'Delete “%s”?', exported: 'Exported', imported: 'Imported %d item(s)', badFile: 'Unrecognised file',
     sampleRO: 'The sample entry is read-only', processing: 'Processing…', guideBand: 'PS5 band', guideBleed: 'Bleed', hub: 'Hub', title: '3D Showcase · digital physical editions' },
@@ -33,7 +33,7 @@ const S = {
 const t = (k) => S[lang][k] ?? k
 function syncLang() {
   document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'; document.title = t('title')
-  for (const k of ['brandT', 'brandS', 'vSpine', 'vFront', 'makeT', 'loadT', 'emptyH', 'emptyP', 'emptyBtn', 'mExport', 'mImport', 'iBackT', 'iEdit', 'iLeft', 'iRight', 'iDel', 'eCancel', 'eSave', 'lTitle', 'lBand', 'platNote', 'slotNote', 'cHint', 'cReset', 'cReplace', 'cRemove', 'cDone']) { const el = $(k); if (el) el.textContent = t(k) }
+  for (const k of ['brandT', 'brandS', 'vSpine', 'vFront', 'makeT', 'loadT', 'emptyH', 'emptyP', 'emptyBtn', 'mExport', 'mImport', 'iBackT', 'iEdit', 'iLeft', 'iRight', 'iDel', 'eCancel', 'eSave', 'lTitle', 'lBand', 'lKey', 'slotNote', 'cHint', 'cReset', 'cReplace', 'cRemove', 'cDone']) { const el = $(k); if (el) el.textContent = t(k) }
   $('langBtn').textContent = lang === 'en' ? '中文' : 'EN'; $('back').href = BASE
   syncInspectUI(); if (editing) renderSlots()
 }
@@ -142,14 +142,20 @@ function cabinetCenter() { return new THREE.Vector3(0, PLINTH + (NSH * SP) / 2, 
 
 // ---------------- proxies on the shelf ----------------
 const tintMat = new THREE.MeshPhysicalMaterial({ color: 0x1846d0, roughness: 0.18, transparent: true, opacity: 0.88, clearcoat: 0.8, clearcoatRoughness: 0.1 })
-const proxyGeo = new THREE.BoxGeometry(W, H, D)
+const tintMats = { ps5: tintMat,
+  ns: new THREE.MeshPhysicalMaterial({ color: 0xeef3f6, roughness: 0.12, transparent: true, opacity: 0.55, clearcoat: 0.9, clearcoatRoughness: 0.08 }),
+  ns2: new THREE.MeshPhysicalMaterial({ color: 0xc8101e, roughness: 0.16, transparent: true, opacity: 0.88, clearcoat: 0.8, clearcoatRoughness: 0.1 }) }
+const proxyGeos = {}
+const specOf = (e) => platformSpec(e?.platform)
+function proxyGeo(p) { const s = platformSpec(p); return (proxyGeos[s.W + ':' + s.D] ||= new THREE.BoxGeometry(s.W, s.H, s.D)) }
 let entries = [], proxies = new Map(), artCache = new Map(), viewMode = localStorage.getItem('showcase-view') || 'spine'
 const TEXMAX = mobile ? 512 : 768
 function shrink(src, max) {
   const s = Math.min(1, max / Math.max(src.width, src.height)); const c = canvas(Math.max(2, Math.round(src.width * s)), Math.max(2, Math.round(src.height * s)))
   c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return tx
 }
-function proxyMats(art) {
+function proxyMats(art, p = 'ps5') {
+  const tintMat = tintMats[p] || tintMats.ps5
   const film = (map) => new THREE.MeshPhysicalMaterial({ map, roughness: 0.42, clearcoat: 0.7, clearcoatRoughness: 0.12 })
   return [tintMat, film(shrink(art.spine, TEXMAX)), tintMat, tintMat, film(shrink(art.front, TEXMAX)), film(shrink(art.back, TEXMAX))]
 }
@@ -161,23 +167,28 @@ async function getArt(e) {
   else { const imgs = {}; for (const k of Object.keys(TEMPLATES)) imgs[k] = await blobToImage(e.slots?.[k]?.blob); art = buildArt(e, imgs) }
   artCache.set(e.id, art); return art
 }
+// Mixed shelves: every case keeps its real footprint (PS5 13.5 mm spine, Switch 11 mm), packed row by row.
+let LAY = []
+function computeLayout() {
+  const avail = viewMode === 'spine' ? CW - 0.3 : CW - 0.2, rows = [[]]; let used = 0
+  for (const e of entries) { const s = specOf(e), w = viewMode === 'spine' ? s.D + 0.045 : s.W + 0.16; if (used + w > avail && rows[rows.length - 1].length) { rows.push([]); used = 0 } rows[rows.length - 1].push({ e, w, s }); used += w }
+  LAY = []; rows.forEach((r, ri) => { const tot = r.reduce((a, b) => a + b.w, 0); let x = -tot / 2; for (const it of r) { LAY.push({ row: ri, x: x + it.w / 2, s: it.s }); x += it.w } })
+  return rows.length
+}
 function capacity() { return viewMode === 'spine' ? Math.floor((CW - 0.3) / (D + 0.045)) : Math.floor((CW - 0.2) / (W + 0.16)) }
 function layoutTarget(i) {
-  const cap = capacity(), shelf = NSH - 1 - Math.floor(i / cap), k = i % cap
-  const onShelf = Math.min(cap, entries.length - Math.floor(i / cap) * cap)
-  const y = shelfY[shelf] + 0.024 + H / 2
-  if (viewMode === 'spine') { const pitch = D + 0.045; const x = (k - (onShelf - 1) / 2) * pitch; return { p: new THREE.Vector3(x, y, -0.05), r: new THREE.Euler(0, Math.PI / 2, 0) } }
-  const pitch = W + 0.16, x = (k - (onShelf - 1) / 2) * pitch
-  return { p: new THREE.Vector3(x, y + 0.01, -0.35), r: new THREE.Euler(-0.07, 0, 0) }
+  const L = LAY[i], shelf = NSH - 1 - L.row, y = shelfY[shelf] + 0.024 + L.s.H / 2
+  if (viewMode === 'spine') return { p: new THREE.Vector3(L.x, y, -0.05), r: new THREE.Euler(0, Math.PI / 2, 0) }
+  return { p: new THREE.Vector3(L.x, y + 0.01, -0.35), r: new THREE.Euler(-0.07, 0, 0) }
 }
 async function syncShelf(animate = true) {
-  const need = Math.max(3, Math.ceil(entries.length / capacity()))
+  const need = Math.max(3, computeLayout())
   if (need !== NSH || !cabinet.children.length) buildCabinet(need)
   const ids = new Set(entries.map((e) => e.id))
   for (const [id, m] of proxies) if (!ids.has(id)) { scene.remove(m); m.material.forEach((x) => x.map && x.map.dispose()); proxies.delete(id) }
   for (const [i, e] of entries.entries()) {
     let m = proxies.get(e.id)
-    if (!m) { const art = await getArt(e); m = new THREE.Mesh(proxyGeo, proxyMats(art)); m.castShadow = true; m.receiveShadow = true; m.userData.id = e.id; scene.add(m); proxies.set(e.id, m); m.userData.fresh = true }
+    if (!m) { const art = await getArt(e); m = new THREE.Mesh(proxyGeo(e.platform), proxyMats(art, e.platform || 'ps5')); m.castShadow = true; m.receiveShadow = true; m.userData.id = e.id; scene.add(m); proxies.set(e.id, m); m.userData.fresh = true }
     const L = layoutTarget(i); m.userData.home = L
     if (!animate || m.userData.fresh) { m.position.copy(L.p); m.rotation.copy(L.r); if (m.userData.fresh && animate) { m.scale.setScalar(0.001); m.userData.pop = 0 } m.userData.fresh = false }
     else m.userData.glide = { from: m.position.clone(), q0: m.quaternion.clone(), t: 0 }
@@ -187,14 +198,25 @@ async function syncShelf(animate = true) {
 }
 async function refreshProxy(e) {
   artCache.delete(e.id); const m = proxies.get(e.id); if (!m) return
-  const art = await getArt(e); m.material.forEach((x) => x.map && x.map.dispose()); m.material = proxyMats(art); dirty = 3
+  const art = await getArt(e); m.material.forEach((x) => x.map && x.map.dispose()); m.geometry = proxyGeo(e.platform); m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
 }
 
 // ---------------- inspect model (one shared full case) ----------------
 const holder = new THREE.Group(); scene.add(holder); holder.visible = false
-const model = createCaseModel({ renderer, scene, mobile, maxAniso: mobile ? 4 : 8 })
-holder.add(model.root); model.disc.visible = false
-model.root.traverse((o) => { if (o.isMesh) o.castShadow = true })
+const models = {}
+let model = null
+function useModel(p) {
+  p = ['ns', 'ns2'].includes(p) ? p : 'ps5'
+  if (!models[p]) {
+    const m = createCaseModel({ renderer, scene, mobile, maxAniso: mobile ? 4 : 8, platform: p })
+    holder.add(m.root); m.disc.visible = false; m.root.traverse((o) => { if (o.isMesh) o.castShadow = true }); models[p] = m
+  }
+  const wasVis = model ? model.disc.visible : false
+  for (const [k, m] of Object.entries(models)) { m.root.visible = k === p; if (k !== p) m.disc.visible = false }
+  model = models[p]; model.disc.visible = wasVis; return model
+}
+useModel('ps5')
+const Hm = () => model.H
 const INS = new THREE.Vector3() // world centre of inspected case
 function inspectPose() { const c = cabinetCenter(); INS.set(0, Math.min(c.y, 2.4), CD / 2 + 2.3); return INS }
 
@@ -212,7 +234,7 @@ function camShelfGoal() {
 }
 function camInspectGoal() {
   const d = mobile && innerWidth < innerHeight ? 5.2 : 4.0
-  if (discFocus) { const f = floatPoint(); return { p: f.clone().add(new THREE.Vector3(0, 0.35, d * 0.62)), t: f.clone() } }
+  if (discFocus) { const f = floatPoint(), k = model.kind === 'cart' ? 0.56 : 0.62; return { p: f.clone().add(new THREE.Vector3(0, 0.35 * k / 0.62, d * k)), t: f.clone() } }
   const x = open > 0.4 ? -0.62 : 0
   return { p: INS.clone().add(new THREE.Vector3(1.1 + x, 0.45, d)), t: INS.clone().add(new THREE.Vector3(x, 0, 0)) }
 }
@@ -225,12 +247,12 @@ async function selectEntry(id) {
   const m = proxies.get(id); if (!m) return
   sel = entries.find((e) => e.id === id); inspectPose()
   flyFrom = { p: m.position.clone(), q: m.quaternion.clone() }; flyT = 0; mode = 'fly'; document.body.className = 'mode-inspect'; doorTarget = 1
-  $('empty').classList.add('hidden'); pending = getArt(sel).then((art) => model.setArt(art))
+  $('empty').classList.add('hidden'); useModel(sel.platform); pending = getArt(sel).then((art) => model.setArt(art))
   goCam(camInspectGoal())
 }
 async function finishFly() {
   await pending; const m = proxies.get(sel.id)
-  holder.position.copy(INS).sub(new THREE.Vector3(0, H / 2, 0)); holder.rotation.set(0, 0, 0); holder.visible = true; model.disc.visible = true
+  holder.position.copy(INS).sub(new THREE.Vector3(0, Hm() / 2, 0)); holder.rotation.set(0, 0, 0); holder.visible = true; model.disc.visible = true
   open = openT = hubP = hubT = out = outT = 0; discFocus = false; flip = flipT = 0
   model.pose(0, 0); m.visible = false; setMode('inspect'); goCam(camInspectGoal())
 }
@@ -247,9 +269,9 @@ function pressHub() { if (mode !== 'inspect' || open < 0.65 || outT) return; res
 function reseat() { discFocus = false; flipT = 0; outT = 0; reseating = true; syncInspectUI(); goCam(camInspectGoal()) }
 function syncInspectUI() {
   if (!sel) return
-  $('iTitle').textContent = sel.title || ''; $('iSub').textContent = sel.sample ? t('sample') : `PS5 · ${t('made')}`
+  $('iTitle').textContent = sel.title || ''; $('iSub').textContent = sel.sample ? t('sample') : `${{ ps5: 'PS5', ns: 'Nintendo Switch', ns2: 'Nintendo Switch 2' }[sel.platform || 'ps5']}${sel.keyCard && sel.platform === 'ns2' ? ' · Game-Key Card' : ''} · ${t('made')}`
   $('iOpen').textContent = openT ? t('close') : t('open'); $('iOpen').disabled = !!(outT || out > 0.02 || hubT)
-  $('iDisc').textContent = (outT || discFocus) ? t('put') : t('take'); $('iDisc').disabled = !(open > 0.65) && !outT
+  const cart = model.kind === 'cart'; $('iDisc').textContent = (outT || discFocus) ? t(cart ? 'putC' : 'put') : t(cart ? 'takeC' : 'take'); $('iDisc').disabled = !(open > 0.65) && !outT
   $('iFlip').textContent = t('flip'); $('iFlip').classList.toggle('hidden', !discFocus)
   $('iEdit').disabled = !!sel.sample
 }
@@ -310,11 +332,14 @@ function tick() {
     holder.updateMatrixWorld(true); model.seatWorld(_seat)
     const e = ease(out), F = floatPoint()
     _lift.copy(_seat).add(new THREE.Vector3(0.05, 0.12, 0.35))
+    const isCart = model.kind === 'cart'; model.disc.scale.setScalar(isCart ? 1 + 1.8 * THREE.MathUtils.smoothstep(e, 0.3, 1) : 1)
     if (out < 0.01) { model.disc.position.copy(_seat); model.disc.quaternion.copy(holder.quaternion); spin = 0 }
+    else if (isCart && e < 0.35) { const k = e / 0.35; model.disc.position.lerpVectors(_seat, _lift, ease(k)); model.disc.rotation.set(-k * 0.25, 0, 0) }
     else if (e < 0.35) { const k = e / 0.35; model.disc.position.lerpVectors(_seat, _lift, ease(k)); model.disc.rotation.set(-k * 0.15, k * 0.1, 0) }
     else {
       const k = (e - 0.35) / 0.65; model.disc.position.lerpVectors(_lift, F, ease(k))
-      if (discFocus) { if (!qs.has('shot')) spin += dt * 0.35; flip = step(flip, flipT, dt, 0.7); model.disc.rotation.set(-0.3, ease(flip) * Math.PI, 0); model.disc.rotateZ(spin) }
+      if (discFocus && isCart) { if (!qs.has('shot')) spin += dt * 0.6; flip = step(flip, flipT, dt, 0.7); model.disc.rotation.set(-0.18, ease(flip) * Math.PI + Math.sin(spin) * 0.3, 0) }
+      else if (discFocus) { if (!qs.has('shot')) spin += dt * 0.35; flip = step(flip, flipT, dt, 0.7); model.disc.rotation.set(-0.3, ease(flip) * Math.PI, 0); model.disc.rotateZ(spin) }
       else model.disc.rotation.set(-0.3 * k, 0.2 * k, 0)
     }
     holder.visible = !(discFocus && out > 0.97)
@@ -388,17 +413,33 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (mode === 'edi
 // ---------------- editor ----------------
 let editing = null, draft = null, draftImgs = {}, draftArt = null, cropKey = null, artTimer = 0, prevSel = null, prevMode = null
 const SLOT_KEYS = ['front', 'spine', 'back', 'inner', 'disc']
+const TPL = () => templatesFor(draft?.platform)
+function syncPlat() {
+  const p = draft.platform || 'ps5'
+  for (const b of $('platSeg').children) b.setAttribute('aria-pressed', String(b.dataset.p === p))
+  $('keyWrap').classList.toggle('hidden', p !== 'ns2'); $('fKey').checked = !!draft.keyCard
+  $('platNote').textContent = t('pn_' + p)
+}
+$('platSeg').onclick = (e) => {
+  const p = e.target.dataset?.p; if (!p || !draft || p === draft.platform) return
+  draft.platform = p; if (p !== 'ns2') draft.keyCard = false
+  for (const k of SLOT_KEYS) if (draft.slots[k]?.crop) draft.slots[k].crop = { x: 0, y: 0, s: 1 } // aspect changed → reset framing
+  const vis = model.disc.visible; useModel(p); model.disc.visible = vis
+  holder.position.copy(INS).sub(new THREE.Vector3(0, Hm() / 2, 0)); open = openT = hubP = hubT = out = outT = 0; discFocus = false; model.pose(0, 0)
+  syncPlat(); rebuildDraft(); renderSlots(); $('crop').classList.add('hidden')
+}
+$('fKey').onchange = () => { draft.keyCard = $('fKey').checked; scheduleArt() }
 function openEditor(entry) {
   closeMenus(); prevMode = mode; prevSel = sel
   editing = entry || { id: null }
   draft = entry ? JSON.parse(JSON.stringify({ ...entry, slots: Object.fromEntries(Object.entries(entry.slots || {}).map(([k, v]) => [k, { crop: v.crop }])) })) : { title: '', platform: 'ps5', band: true, slots: {} }
   if (entry) for (const k of SLOT_KEYS) if (entry.slots?.[k]?.blob) draft.slots[k].blob = entry.slots[k].blob
-  draftImgs = {}
+  draftImgs = {}; draft.platform ||= 'ps5'; useModel(draft.platform); syncPlat()
   $('fTitle').value = draft.title || ''; $('fBand').checked = draft.band !== false
   $('eTitleH').textContent = entry ? t('eEdit') : t('eNew')
   $('editor').classList.remove('hidden'); $('crop').classList.add('hidden')
   // stage the full model for live preview
-  if (mode !== 'inspect') { inspectPose(); holder.position.copy(INS).sub(new THREE.Vector3(0, H / 2, 0)); holder.visible = true; model.disc.visible = true; open = openT = hubP = hubT = out = outT = 0; discFocus = false; model.pose(0, 0); doorTarget = 1 }
+  if (mode !== 'inspect') { model.disc.visible = true; inspectPose(); holder.position.copy(INS).sub(new THREE.Vector3(0, Hm() / 2, 0)); holder.visible = true; model.disc.visible = true; open = openT = hubP = hubT = out = outT = 0; discFocus = false; model.pose(0, 0); doorTarget = 1 }
   else if (sel) { proxies.get(sel.id).visible = false }
   if (outT) { outT = out = 0; hubT = hubP = 0; discFocus = false }
   mode = 'editor'; document.body.className = 'mode-editor'; $('inspect').classList.add('hidden'); $('empty').classList.add('hidden')
@@ -415,7 +456,7 @@ function renderSlots() {
   const box = $('slots'); box.innerHTML = ''
   for (const k of SLOT_KEYS) {
     const has = !!draft.slots[k]?.blob, el = document.createElement('button'); el.className = 'slot' + (k === 'front' && !has ? ' req' : '') + (has ? ' up' : ''); el.dataset.k = k
-    el.innerHTML = `<div class="th">${has || draftArt ? '' : '＋'}</div><b>${TEMPLATES[k].label[lang === 'en' ? 1 : 0]}</b><i>${has ? t('uploaded') : k === 'front' ? t('required') : t('auto')}</i>`
+    el.innerHTML = `<div class="th">${has || draftArt ? '' : '＋'}</div><b>${TPL()[k].label[lang === 'en' ? 1 : 0]}</b><i>${has ? t('uploaded') : k === 'front' ? t('required') : t('auto')}</i>`
     el.onclick = () => { if (!has) pickFile(k); else openCrop(k) }
     box.appendChild(el)
   }
@@ -444,7 +485,7 @@ $('eSave').onclick = async () => {
   if (!draft.title) { toast(t('needTitle')); $('fTitle').focus(); return }
   if (!draft.slots.front?.blob) { toast(t('needFront')); return }
   const isNew = !editing.id
-  const e = { id: editing.id || uid(), title: draft.title, platform: 'ps5', band: draft.band, slots: draft.slots, createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(), order: isNew ? entries.length : editing.order }
+  const e = { id: editing.id || uid(), title: draft.title, platform: draft.platform || 'ps5', keyCard: draft.platform === 'ns2' && !!draft.keyCard, band: draft.band, slots: draft.slots, createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(), order: isNew ? entries.length : editing.order }
   await db.put(e)
   if (isNew) entries.push(e); else entries[entries.findIndex((x) => x.id === e.id)] = e
   artCache.set(e.id, draftArt); if (!isNew) await refreshProxy(e); else artCache.set(e.id, draftArt)
@@ -453,7 +494,7 @@ $('eSave').onclick = async () => {
 async function closeEditor(saved, entry, isNew) {
   $('editor').classList.add('hidden'); editing = null; mode = 'shelf'; applyViewOffset()
   if (prevMode === 'inspect' && prevSel && !(saved && isNew)) {
-    sel = saved ? entry : prevSel; mode = 'inspect'; const art = await getArt(sel); model.setArt(art)
+    sel = saved ? entry : prevSel; mode = 'inspect'; useModel(sel.platform); model.disc.visible = true; holder.position.copy(INS).sub(new THREE.Vector3(0, Hm() / 2, 0)); const art = await getArt(sel); model.setArt(art)
     setMode('inspect'); goCam(camInspectGoal()); return
   }
   holder.visible = false; model.disc.visible = false
@@ -467,13 +508,13 @@ const cc = $('cc'), cg = cc.getContext('2d')
 function openCrop(k) {
   cropKey = k; cropImg = draftImgs[k]; if (!cropImg) return pickFile(k)
   cropState = draft.slots[k].crop ||= { x: 0, y: 0, s: 1 }
-  $('crop').classList.remove('hidden'); $('cTitle').textContent = TEMPLATES[k].label[lang === 'en' ? 1 : 0]
+  $('crop').classList.remove('hidden'); $('cTitle').textContent = TPL()[k].label[lang === 'en' ? 1 : 0]
   $('cZoom').value = cropState.s; $('cRemove').disabled = k === 'front'
   requestAnimationFrame(drawCrop)
 }
 function drawCrop() {
   if (!cropKey || !cropImg) return
-  const T = TEMPLATES[cropKey], rot = cropKey === 'spine', wrap = $('cwrap').getBoundingClientRect()
+  const T = TPL()[cropKey], rot = cropKey === 'spine', wrap = $('cwrap').getBoundingClientRect()
   const tw = rot ? T.h : T.w, th = rot ? T.w : T.h
   const sc = Math.min((wrap.width - 32) / tw, (wrap.height - 12) / th, 1)
   const dpr = Math.min(devicePixelRatio, 2)
@@ -491,6 +532,17 @@ function drawCrop() {
     cg.strokeStyle = 'rgba(47,111,99,.9)'; cg.lineWidth = lw; cg.setLineDash([10 / sc, 8 / sc]); cg.beginPath(); cg.arc(r, r, r * 0.283, 0, Math.PI * 2); cg.stroke()
     cg.beginPath(); cg.arc(r, r, r - 3, 0, Math.PI * 2); cg.stroke(); cg.setLineDash([])
     cg.fillStyle = 'rgba(47,111,99,.95)'; cg.font = `600 ${14 / sc}px sans-serif`; cg.textAlign = 'center'; cg.fillText(t('hub'), r, r + r * 0.34)
+  } else if (T.rect) { // game-card label: rounded label shape (18.4 × 23.2 mm)
+    const r = T.w * 0.06; cg.fillStyle = 'rgba(246,244,239,.86)'; cg.beginPath(); cg.rect(0, 0, T.w, T.h); cg.roundRect(6, 6, T.w - 12, T.h - 12, r); cg.fill('evenodd')
+    cg.strokeStyle = 'rgba(217,137,63,.95)'; cg.lineWidth = lw; cg.setLineDash([12 / sc, 9 / sc]); cg.beginPath(); cg.roundRect(6, 6, T.w - 12, T.h - 12, r); cg.stroke(); cg.setLineDash([])
+    if (draft.keyCard) { cg.fillStyle = 'rgba(230,0,18,.8)'; cg.beginPath(); cg.arc(T.w - 34, 34, 22, 0, 7); cg.fill() }
+  } else if (draft.platform === 'ns' || draft.platform === 'ns2') {
+    const two = draft.platform === 'ns2', bh = two ? NS2_BAND : NS_BAND, gc = 'rgba(230,0,18,.55)'
+    if (T.band && $('fBand').checked) {
+      cg.fillStyle = gc; cg.fillRect(0, 0, T.w, bh); cg.fillStyle = '#fff'; cg.font = `600 ${Math.min(30, 14 / sc)}px sans-serif`; cg.fillText(cropKey === 'spine' ? (two ? 'NS2' : 'NS') : t('guideBand'), 12, bh / 2 + 6)
+      if (two && cropKey !== 'spine') { const F = NS2_FRAME; cg.fillStyle = gc; cg.fillRect(0, bh, F, T.h - bh); cg.fillRect(T.w - F, bh, F, T.h - bh); cg.fillRect(0, T.h - F, T.w, F); if (cropKey === 'front' && draft.keyCard) { cg.fillStyle = 'rgba(255,255,255,.8)'; cg.fillRect(F, T.h - F - 92, T.w - 2 * F, 92) } }
+    }
+    cg.strokeStyle = 'rgba(217,137,63,.95)'; cg.lineWidth = lw; cg.setLineDash([12 / sc, 9 / sc]); cg.strokeRect(BLEED, BLEED, T.w - 2 * BLEED, T.h - 2 * BLEED); cg.setLineDash([])
   } else {
     if (T.band && $('fBand').checked) { cg.fillStyle = 'rgba(255,255,255,.82)'; cg.fillRect(0, 0, T.w, BANNER); cg.fillStyle = 'rgba(47,111,99,.95)'; cg.font = `600 ${Math.min(30, 14 / sc)}px sans-serif`; cg.fillText(cropKey === 'spine' ? 'PS5' : t('guideBand'), 12, BANNER / 2 + 6) }
     cg.strokeStyle = 'rgba(217,137,63,.95)'; cg.lineWidth = lw; cg.setLineDash([12 / sc, 9 / sc]); cg.strokeRect(BLEED, BLEED, T.w - 2 * BLEED, T.h - 2 * BLEED); cg.setLineDash([])
@@ -536,7 +588,7 @@ async function boot() {
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { entries: () => entries.map((e) => e.title), mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  window.__sc = { entries: () => entries.map((e) => e.title), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 boot()

@@ -90,14 +90,20 @@ function blobTex() {
 const blob = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.5), new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false }))
 blob.rotation.x = -Math.PI / 2; blob.position.y = 0.001; scene.add(blob)
 
-import { createCaseModel, W, H, D } from './caseModel.js'
+import { createCaseModel, W, D } from './caseModel.js'
 import { loadRE4 } from './art.js'
-const model = createCaseModel({ renderer, scene, mobile })
+import { buildArt } from '../showcase/gen.js'
+const PLAT = ['ns', 'ns2'].includes(qs.get('platform')) ? qs.get('platform') : 'ps5'
+const model = createCaseModel({ renderer, scene, mobile, platform: PLAT })
+const H = model.H
 const { root, base, cover, coverPlate, spineG, coverHinge, hub, btn, btnHit, teeth, disc, discPick, shadowDisc, booklet, sleeve,
   shellMat, trayMat, filmMat, wrapPaper, bookletMat, bkPaper, labelMat, dataMat, updateWrap, seatWorld } = model
 const _seat = new THREE.Vector3()
 const FLOAT = new THREE.Vector3(0, 1.1, 0)
-loadRE4(BASE).then((a) => model.setArt(a))
+if (PLAT === 'ps5') loadRE4(BASE).then((a) => model.setArt(a))
+else { // Switch demo: generated print set from a sample cover (Game-Key Card on NS2 with ?key)
+  const im = new Image(); im.onload = () => model.setArt(buildArt({ title: 'Resident Evil 4', platform: PLAT, keyCard: qs.has('key'), band: true, slots: {} }, { front: im })); im.src = BASE + 'demo/re4_front_art.jpg'
+}
 // ---- State machine ----
 // open: 0 closed … 1 book-open (~170° around spine Y)
 // hubPress: 0 idle … 1 fully depressed (teeth retracted)
@@ -135,6 +141,11 @@ const T_ = {
     hintBrowse: 'Orbit to inspect · Flip to see the data side · Reseat to return',
     back: '← Back to catalog', lang: '中文',
   },
+}
+if (PLAT !== 'ps5') { // Switch / Switch 2 copy
+  const n = PLAT === 'ns2' ? 'Switch 2' : 'Switch'
+  Object.assign(T_.zh, { h1: `${n} 游戏盒`, sub: `Resident Evil 4 · 书脊对开 · 按卡座取卡带${qs.has('key') ? ' · Game-Key Card' : ''}`, take: '取出卡带', put: '放回卡座', browse: '查看卡带', hint: '拖动旋转 · 双指缩放/平移 · 点封面开盒 · 点卡座取卡带', hintBrowse: '拖动旋转查看 · 点「翻面」看触点面 · 点「放回卡座」归位' })
+  Object.assign(T_.en, { h1: `${n} Game Case`, sub: `Resident Evil 4 · book-hinge · tap the holder to take the card`, take: 'Take card', put: 'Put card back', browse: 'View card', flip: 'Flip card', hint: 'Drag to rotate · pinch to zoom/pan · tap cover to open · tap holder for the card', hintBrowse: 'Drag to inspect · Flip shows the contacts · Put back to reseat' })
 }
 function syncUI() {
   const t = T_[lang]
@@ -348,6 +359,7 @@ function tick() {
   caseAway += ((discFocus ? 1 : 0) - caseAway) * (1 - Math.exp(-dt * 4))
   root.position.x = -caseAway * 3.2
   root.visible = caseAway < 0.97
+  if (model.kind === 'cart') disc.scale.setScalar(1 + 1.8 * caseAway)
   blob.visible = root.visible
   discLights.forEach((l) => (l.visible = discFocus))
   root.position.y = H / 2 + 0.0005
