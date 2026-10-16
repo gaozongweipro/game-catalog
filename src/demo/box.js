@@ -25,12 +25,16 @@ pmrem.dispose()
 const camera = new THREE.PerspectiveCamera(35, 1, 0.02, 50)
 const HOME = new THREE.Vector3(1.55, 1.05, 3.55)
 const TARGET = new THREE.Vector3(0, 0.85, 0)
-const DISC_HOME = new THREE.Vector3(0.15, 1.35, 2.35)
-const DISC_TARGET = new THREE.Vector3(0.15, 1.15, 0.55)
+const DISC_HOME = new THREE.Vector3(0, 1.45, 3.0)
+const DISC_TARGET = new THREE.Vector3(0, 1.1, 0)
 camera.position.copy(HOME)
 const controls = new OrbitControls(camera, canvas)
 controls.enableDamping = true
-controls.enablePan = false
+controls.enablePan = true
+controls.screenSpacePanning = true
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }
+let userMoved = false
+controls.addEventListener('start', () => { userMoved = true })
 controls.minDistance = 0.5
 controls.maxDistance = 7
 controls.target.copy(TARGET)
@@ -47,6 +51,9 @@ scene.add(key)
 const fill = new THREE.DirectionalLight(0xdcecff, 0.55); fill.position.set(-3, 2, -1); scene.add(fill)
 const rim = new THREE.DirectionalLight(0xffffff, 0.95); rim.position.set(-1.5, 3, -4); scene.add(rim)
 
+const discLights = [new THREE.DirectionalLight(0xffffff, 0.5), new THREE.DirectionalLight(0xbfd8ff, 0.45), new THREE.DirectionalLight(0xffe2c4, 0.35)]
+discLights[0].position.set(1.5, 2.5, 2.5); discLights[1].position.set(-2, 1.5, -2); discLights[2].position.set(2, 0.6, -1)
+discLights.forEach((l) => { l.visible = false; scene.add(l) })
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.ShadowMaterial({ opacity: 0.18 }))
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground)
 function blobTex() {
@@ -66,7 +73,7 @@ const HALF = D / 2
 const LITE = mobile || qs.has('lite')
 // Translucent blue PP (n≈1.49). Desktop: real transmission; mobile: tuned alpha blend (cheaper, still see-through).
 const shellMat = true // v7: alpha-blended tint everywhere — transmission blurred the print seen through the shell
-  ? new THREE.MeshPhysicalMaterial({ color: 0x0636d8, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.46, ior: 1.49,
+  ? new THREE.MeshPhysicalMaterial({ color: 0x0028c4, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.5, ior: 1.49,
       clearcoat: 0.4, clearcoatRoughness: 0.1, specularIntensity: 0.5, side: THREE.FrontSide, depthWrite: false })
   : new THREE.MeshPhysicalMaterial({ color: 0x5f8cff, roughness: 0.015, metalness: 0, transmission: 1, thickness: 0.011, ior: 1.49,
       attenuationColor: new THREE.Color(0x0a32c8), attenuationDistance: 0.16, clearcoat: 0.5, clearcoatRoughness: 0.12,
@@ -148,9 +155,12 @@ function uWall(w, h, r, wall, depth, openLeft = true, YC = 0.1) {
 }
 
 const PX = 800
-const img = new Image()
-const loaded = new Promise((res) => { img.onload = res; img.onerror = res })
-img.src = `${BASE}demo/cover.jpg`
+function loadImg(n) { const i = new Image(); const p = new Promise((res) => { i.onload = res; i.onerror = res }); i.src = `${BASE}demo/${n}`; return [i, p] }
+// RE4 Gold Edition (HK/Asia, ELAS 10653): front art = official PS Store key art; spine/back/inner/disc = user's own photos (warped + colour-corrected)
+const [img, p0] = loadImg('re4_front_art.jpg')
+const RE = {}; const ps = [p0]
+for (const n of ['spine', 'back', 'inner_cover', 'inner_tray', 'disc']) { const [i, p] = loadImg(`re4_${n}.jpg`); RE[n] = i; ps.push(p) }
+const loaded = Promise.all(ps)
 function ctx(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d')] }
 function tex(c) { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t }
 function drawCover(g, x, y, w, h, zoom = 1, fx = 0.5, fy = 0.5) {
@@ -180,10 +190,24 @@ const FRONT_W = INS_W * PX, FRONT_H = INS_H * PX, SPINE_W = Math.round((D - 0.00
 function frontTex() {
   const [c, g] = ctx(FRONT_W, FRONT_H)
   drawCover(g, 0, BANNER + 4, FRONT_W, FRONT_H - BANNER - 4)
-  banner(g, FRONT_W); ratingBox(g, 38, FRONT_H - 190, 120); return c
+  banner(g, FRONT_W)
+  // HK/Asia retail front: BIOHAZARD RE:4 logo + GOLD EDITION plate (as on user's photo E)
+  g.save(); g.textAlign = 'center'; g.shadowColor = 'rgba(0,0,0,.7)'; g.shadowBlur = 18
+  g.fillStyle = '#f2f2f2'; g.font = '900 118px "Arial Narrow", Impact, "DejaVu Sans Condensed", sans-serif'
+  try { g.letterSpacing = '4px' } catch {}
+  g.fillText('BIOHAZARD', FRONT_W / 2, FRONT_H * 0.56)
+  g.fillStyle = '#c4161c'; g.font = '900 150px Impact, "DejaVu Sans Condensed", sans-serif'; g.fillText('RE:4', FRONT_W / 2, FRONT_H * 0.56 + 150)
+  g.shadowBlur = 0; const gw = 330, gy = FRONT_H * 0.56 + 190
+  const gr = g.createLinearGradient(0, gy, 0, gy + 60); gr.addColorStop(0, '#f3dc94'); gr.addColorStop(1, '#a8823a')
+  g.fillStyle = gr; g.fillRect(FRONT_W / 2 - gw / 2, gy, gw, 60); g.fillStyle = '#1a1206'; g.font = '800 40px "Arial Narrow", Arial, sans-serif'
+  g.fillText('GOLD EDITION', FRONT_W / 2, gy + 45); g.restore()
+  ratingBox(g, 38, FRONT_H - 190, 120)
+  g.fillStyle = '#fff'; g.font = '700 34px Arial'; g.textAlign = 'right'; g.fillText('CAPCOM', FRONT_W - 40, FRONT_H - 50); g.textAlign = 'left'
+  return c
 }
 function spineTex() {
   const [c, g] = ctx(SPINE_W, FRONT_H)
+  if (RE.spine?.width) { g.drawImage(RE.spine, 0, 0, SPINE_W, FRONT_H); return c }
   const gr = g.createLinearGradient(0, 0, 0, FRONT_H); gr.addColorStop(0, '#1c1a1d'); gr.addColorStop(1, '#3a1013')
   g.fillStyle = gr; g.fillRect(0, 0, SPINE_W, FRONT_H)
   g.fillStyle = '#fff'; g.fillRect(0, 0, SPINE_W, BANNER + 40); g.fillStyle = '#0070d1'; g.fillRect(0, BANNER + 40, SPINE_W, 4)
@@ -201,6 +225,7 @@ function barcode(g, x, y, w, h) {
 }
 function backTex() {
   const [c, g] = ctx(FRONT_W, FRONT_H)
+  if (RE.back?.width) { g.drawImage(RE.back, 0, 0, FRONT_W, FRONT_H); return c }
   g.fillStyle = '#121014'; g.fillRect(0, 0, FRONT_W, FRONT_H)
   drawCover(g, 0, BANNER, FRONT_W, 520, 2.2, 0.5, 0.12)
   const fade = g.createLinearGradient(0, BANNER + 300, 0, BANNER + 520); fade.addColorStop(0, 'rgba(18,16,20,0)'); fade.addColorStop(1, '#121014')
@@ -484,10 +509,10 @@ function wrapInnerTex() {
   // tray-side panel (behind disc) = left of sheet once mirrored
   const pw = Wc - xB
   // cover interior: back-cover style layout (photo C); tray side: dim key art behind the disc (photo B)
-  g.drawImage(backTex(), 0, 0, pw, Hc)
-  drawCover(g, Wc - xA, 0, xA, Hc, 1.9, 0.85, 0.3)
-  g.fillStyle = 'rgba(10,12,30,.4)'; g.fillRect(Wc - xA, 0, xA, Hc)
-  g.drawImage(spineTex(), pw, 0, Wc - xA - pw, Hc)
+  // real double-sided insert of the user's copy: photo C (cover side) + photo B (tray side)
+  g.drawImage(RE.inner_cover, 0, 0, pw, Hc)
+  g.drawImage(RE.inner_tray, Wc - xA, 0, xA, Hc)
+  g.fillStyle = '#10141c'; g.fillRect(pw, 0, Wc - xA - pw, Hc)
   g.restore(); return tex(c)
 }
 updateWrap()
@@ -495,10 +520,10 @@ updateWrap()
 // Disc
 const R = 0.6, rH = 0.075, DT = 0.012
 const disc = new THREE.Group(); scene.add(disc) // world-space so browse mode is independent of case
-const dataMat = new THREE.MeshPhysicalMaterial({ color: 0xc4c8e4, metalness: 1, roughness: 0.07, iridescence: 1, iridescenceIOR: 1.8, iridescenceThicknessRange: [250, 950], side: THREE.DoubleSide })
+const dataMat = new THREE.MeshPhysicalMaterial({ color: 0xc4c8e4, metalness: 1, roughness: 0.16, envMapIntensity: 0.8, iridescence: 1, iridescenceIOR: 1.8, iridescenceThicknessRange: [250, 950], side: THREE.DoubleSide })
 const mirrorMat = new THREE.MeshPhysicalMaterial({ color: 0xe8eaf2, metalness: 1, roughness: 0.04, side: THREE.DoubleSide })
 const clearMat = new THREE.MeshPhysicalMaterial({ color: 0xdfe6f0, roughness: 0.06, transparent: true, opacity: 0.22, ior: 1.58, specularIntensity: 1, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false })
-const labelMat = new THREE.MeshPhysicalMaterial({ roughness: 0.42, clearcoat: 0.4, clearcoatRoughness: 0.3 })
+const labelMat = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0, envMapIntensity: 0.35 })
 const discPick = []
 function discRing(r0, r1, mat, z, flip) {
   const m = mesh(new THREE.RingGeometry(r0, r1, 128, 1), mat, disc, false); m.position.z = z; if (flip) m.rotation.y = Math.PI; discPick.push(m); return m
@@ -519,12 +544,12 @@ function seatWorld(out = new THREE.Vector3()) {
   return out.set(DISC_X, DISC_Y, TRAY_Z + 0.005).applyMatrix4(root.matrixWorld)
 }
 const _seat = new THREE.Vector3()
-const FLOAT = new THREE.Vector3(0.15, 1.15, 0.55) // disc-focus hover point (world)
+const FLOAT = new THREE.Vector3(0, 1.1, 0) // disc-focus hover point (world)
 disc.position.copy(seatWorld(_seat))
 
 loaded.then(() => {
   wrapPaper.map = wrapTex(); wrapInnerPaper.map = wrapInnerTex(); wrapInnerPaper.needsUpdate = true
-  labelMat.map = discLabelTex(); bkPaper.map = bookletCoverTex()
+  labelMat.map = (() => { const t = new THREE.Texture(RE.disc); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true; return t })(); bkPaper.map = bookletCoverTex()
   ;[wrapPaper, labelMat, bkPaper].forEach((m) => (m.needsUpdate = true))
 })
 
@@ -542,27 +567,27 @@ let resetT = 0
 const caseMats = [shellMat, trayMat, filmMat, wrapPaper, bookletMat, bkPaper]
 
 function q(id) { return document.getElementById(id) }
-const ui = { bOpen: q('bOpen'), bDisc: q('bDisc'), bBrowse: q('bBrowse'), bReset: q('bReset'), lang: q('lang') }
+const ui = { bFlip: q('bFlip'), bOpen: q('bOpen'), bDisc: q('bDisc'), bBrowse: q('bBrowse'), bReset: q('bReset'), lang: q('lang') }
 let lang = localStorage.getItem('game-catalog-lang') === 'en' ? 'en' : 'zh'
 const T_ = {
   zh: {
-    h1: 'PS5 游戏盒', sub: '羊蹄山之魂 · 书脊对开 · 按压卡扣取盘',
+    h1: 'PS5 游戏盒', sub: 'Resident Evil 4 Gold Edition · 书脊对开 · 按压卡扣取盘', flip: '翻面',
     open: '打开盒子', close: '合上盒子',
     take: '按压卡扣取盘', put: '放回盒子',
     browse: '查看光盘', exitBrowse: '退出查看',
     reset: '复位视角',
-    hint: '拖动旋转 · 双指缩放 · 点封面开盒 · 按压中心卡扣取盘',
-    hintBrowse: '拖动旋转查看光盘正反面 · 点「放回盒子」归位',
+    hint: '拖动旋转 · 双指缩放/平移 · 点封面开盒 · 按压中心卡扣取盘',
+    hintBrowse: '拖动旋转查看 · 点「翻面」看数据面 · 点「放回盒子」归位',
     back: '← 返回目录', lang: 'EN',
   },
   en: {
-    h1: 'PS5 Game Case', sub: 'Ghost of Yōtei · book-hinge · press hub to release',
+    h1: 'PS5 Game Case', sub: 'Resident Evil 4 Gold Edition · book-hinge · press hub to release', flip: 'Flip disc',
     open: 'Open case', close: 'Close case',
     take: 'Press hub to release', put: 'Reseat disc',
     browse: 'Inspect disc', exitBrowse: 'Exit inspect',
     reset: 'Reset view',
-    hint: 'Drag to orbit · pinch zoom · tap cover to open · press centre hub to release',
-    hintBrowse: 'Orbit to inspect both sides · tap Reseat to return',
+    hint: 'Drag to orbit · pinch zoom / two-finger pan (right- or shift-drag on desktop) · tap cover to open · press hub to release',
+    hintBrowse: 'Orbit to inspect · Flip to see the data side · Reseat to return',
     back: '← Back to catalog', lang: '中文',
   },
 }
@@ -583,6 +608,7 @@ function syncUI() {
   ui.bBrowse.classList.toggle('hidden', !(out > 0.85 || discFocus))
   ui.bBrowse.disabled = out < 0.85 && !discFocus
   ui.bBrowse.textContent = discFocus ? t.exitBrowse : t.browse
+  ui.bFlip.textContent = t.flip; ui.bFlip.classList.toggle('hidden', !discFocus)
   document.body.classList.toggle('disc-focus', discFocus)
 }
 function canOpen() { return !(outTarget || out > 0.02 || discFocus || hubPressTarget) }
@@ -603,7 +629,7 @@ function pressHubRelease() {
 }
 function enterDiscFocus() {
   if (out < 0.85) return
-  discFocus = true
+  discFocus = true; userMoved = false
   focusDismissed = false
   resetT = 0
   syncUI()
@@ -614,7 +640,7 @@ function exitDiscFocus() {
   syncUI()
 }
 function reseatDisc() {
-  discFocus = false
+  discFocus = false; userMoved = false; flipT = 0
   focusDismissed = false
   outTarget = 0
   reseating = true
@@ -624,7 +650,9 @@ ui.bOpen.onclick = toggleOpen
 ui.bDisc.onclick = pressHubRelease
 ui.bBrowse.onclick = () => { if (discFocus) exitDiscFocus(); else enterDiscFocus() }
 ui.lang.onclick = () => { lang = lang === 'en' ? 'zh' : 'en'; try { localStorage.setItem('game-catalog-lang', lang) } catch {}; syncUI() }
-ui.bReset.onclick = () => { resetT = 1 }
+ui.bReset.onclick = () => { resetT = 1; userMoved = false }
+let flip = 0, flipT = 0
+ui.bFlip.onclick = () => { flipT = flipT ? 0 : 1 }
 q('back').href = BASE
 
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2()
@@ -682,6 +710,7 @@ const _tmp = new THREE.Vector3()
 let releaseArmed = false
 let reseating = false
 let lastUiKey = ''
+let caseAway = 0
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05)
@@ -702,7 +731,7 @@ function tick() {
 
   // Auto-enter disc focus once disc has lifted clear (unless user dismissed or screenshot mode)
   if (outTarget === 1 && out > 0.92 && !discFocus && !focusDismissed && !qs.has('shot')) {
-    discFocus = true
+    discFocus = true; userMoved = false
     syncUI()
   }
 
@@ -739,9 +768,11 @@ function tick() {
     disc.position.lerpVectors(_lift, FLOAT, easeIO(k))
     if (discFocus) {
       // gentle idle tumble so both label and data side can be inspected while orbiting
-      discSpin += dt * 0.25
-      const baseY = qs.has('spin') ? Number(qs.get('spin')) || Math.PI : 0.55
-      disc.rotation.set(0.55 + Math.sin(discSpin) * 0.12, baseY + discSpin * 0.35, Math.sin(discSpin * 0.55) * 0.18)
+      // subtle turntable idle spin about the disc's own axis + smooth flip between label and data side
+      if (!qs.has('shot')) discSpin += dt * 0.35
+      flip = step(flip, flipT, dt, 0.7)
+      disc.rotation.set(-0.42, easeIO(flip) * Math.PI, 0)
+      disc.rotateZ(discSpin)
     } else {
       disc.rotation.set(-0.35 - k * 0.2, 0.55 + k * 0.4, 0.15)
     }
@@ -758,16 +789,21 @@ function tick() {
   // Dim case while browsing disc
   const dim = discFocus ? 0.35 : 1
   // (v7) shell opacity left as configured
-  scene.environmentIntensity = discFocus ? 0.55 : 0.9
-  key.intensity = discFocus ? 1.2 : 2.05
-  root.visible = true
+  scene.environmentIntensity = discFocus ? 0.75 : 0.9
+  key.intensity = discFocus ? 0.7 : 2.05
   root.traverse((o) => {
     if (o.isMesh && o.material && o.material.color && o.parent !== disc) {
       // soft dim via material emissive trick — skip; instead scale env
     }
   })
   // Slightly push case back visually when focusing disc
-  root.position.x = discFocus ? -0.35 : 0
+  // case slides away + hides so the disc is inspected standalone
+  const away = THREE.MathUtils.clamp((e - 0.35) / 0.65, 0, 1) * (discFocus || outTarget ? 1 : 0)
+  caseAway += ((discFocus ? 1 : 0) - caseAway) * (1 - Math.exp(-dt * 4))
+  root.position.x = -caseAway * 3.2
+  root.visible = caseAway < 0.97
+  blob.visible = root.visible
+  discLights.forEach((l) => (l.visible = discFocus))
   root.position.y = H / 2 + 0.0005
 
   // Camera targets
@@ -778,13 +814,12 @@ function tick() {
   }
   if (resetT) {
     const k = 1 - Math.exp(-dt * 6)
-    camera.position.lerp(HOME, k); controls.target.lerp(TARGET, k)
-    if (camera.position.distanceTo(HOME) < 0.015) resetT = 0
+    const cg = discFocus ? DISC_HOME : HOME, tg = discFocus ? DISC_TARGET : TARGET
+    camera.position.lerp(cg, k); controls.target.lerp(tg, k)
+    if (camera.position.distanceTo(cg) < 0.015) resetT = 0
   } else if (discFocus) {
     const k = 1 - Math.exp(-dt * 2.8)
-    controls.target.lerp(DISC_TARGET, k)
-    // gentle pull toward a good inspect angle without fighting the user hard
-    if (camera.position.distanceTo(DISC_HOME) > 1.2) camera.position.lerp(DISC_HOME, k * 0.25)
+    if (!userMoved) { controls.target.lerp(DISC_TARGET, k); camera.position.lerp(DISC_HOME, k * 0.6) }
     controls.minDistance = 0.35
     controls.maxDistance = 3.5
   } else {
@@ -792,6 +827,8 @@ function tick() {
     controls.maxDistance = 7
     if (qs.has('cam')) {
       // fixed camera for close-up shots
+    } else if (userMoved) {
+      // keep user's pan/orbit
     } else if (open > 0.3 && out < 0.1) {
       // nudge target slightly left so open book is framed
       _tmp.set(-0.35 * open, 0.85, 0)
@@ -836,3 +873,4 @@ if (qs.has('ajar')) { openTarget = open = Number(qs.get('ajar')) || 0.35 }
 if (qs.has('nobk')) booklet.visible = false
 if (qs.has('nofilm')) sleeve.visible = false
 if (qs.has('noshell')) { shellMat.visible = false; trayMat.visible = false }
+if (qs.has('flip')) { flipT = flip = 1 }
