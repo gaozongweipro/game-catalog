@@ -416,7 +416,7 @@ function syncInspectUI() {
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2(); let downAt = null
 cv.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY, performance.now()]; closeMenus() })
 cv.addEventListener('pointerup', (e) => {
-  if (downAt && mode === 'shelf') { const dx = e.clientX - downAt[0], dy = e.clientY - downAt[1]; if (Math.abs(dx) > 90 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - downAt[2] < 1500) { goPage(page + (dx < 0 ? 1 : -1)); return } }
+  if (downAt && mode === 'shelf') { const dx = e.clientX - downAt[0], dy = e.clientY - downAt[1]; if (Math.abs(dx) > 90 && Math.abs(dx) > 2 * Math.abs(dy)) { goPage(page + (dx < 0 ? 1 : -1)); return } }
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 8 || performance.now() - downAt[2] > 600) return
   ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ptr, camera)
   if (mode === 'shelf') { const hit = ray.intersectObjects([...proxies.values()])[0]; if (hit) selectEntry(hit.object.userData.id); return }
@@ -640,7 +640,7 @@ async function runLookup(q) {
   lkRender('loading')
   const cat = await searchCatalog(q, 6); if (seq !== lkSeq) return
   lkResults = cat; lkRender(cat.length ? 'loading' : 'loading')
-  const web = (cat[0]?.score || 0) >= 0.92 && cat.length >= 3 ? [] : await Promise.race([searchWiki(q, 4).catch(() => []), new Promise((r) => setTimeout(() => r([]), 9000))])
+  const web = (cat[0]?.score || 0) >= 0.92 && cat.length >= 3 ? [] : await Promise.race([searchWiki(q, 4).catch(() => []), new Promise((r) => setTimeout(() => r([]), 12000))])
   if (seq !== lkSeq) return
   const seen = new Set(cat.map((r) => norm(r.titles.en || r.title)))
   lkResults = [...cat, ...web.filter((r) => !seen.has(norm(r.titles.en || r.title)))].slice(0, 8)

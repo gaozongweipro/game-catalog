@@ -35,7 +35,7 @@ export async function searchWiki(q, limit = 5) {
   const langs = hasCJK(q) ? (/[\u3040-\u30ff]/.test(q) ? ['ja', 'zh', 'en'] : ['zh', 'ja', 'en']) : ['en', 'ja']
   const pages = []
   await Promise.all(langs.map(async (L) => {
-    const term = L === 'en' ? `${q} video game` : `${q} ゲーム`.replace('ゲーム', L === 'zh' ? '游戏' : 'ゲーム')
+    const term = L === 'en' ? `${q} video game` : q
     const d = await j(`https://${L}.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=4&gsrsearch=${encodeURIComponent(term)}&prop=pageprops&ppprop=page_image|wikibase_item`)
     for (const p of Object.values(d?.query?.pages || {})) if (p.pageprops?.wikibase_item) pages.push({ L, idx: p.index, title: p.title, img: p.pageprops.page_image, qid: p.pageprops.wikibase_item })
   }))
@@ -52,11 +52,17 @@ export async function searchWiki(q, limit = 5) {
     const lab = (k) => e.labels?.[k]?.value
     const titles = { en: lab('en'), ja: lab('ja'), cn: lab('zh-hans') || lab('zh-cn') || lab('zh') }
     const plats = (e.claims?.P400 || []).map((c) => WD_PLAT[c.mainsnak?.datavalue?.value?.id]).filter(Boolean)
-    let cover = null
-    if (p.img) { const ii = await j(`https://${p.L}.wikipedia.org/w/api.php?action=query&format=json&origin=*&titles=File:${encodeURIComponent(p.img)}&prop=imageinfo&iiprop=url&iiurlwidth=700`); const pg = Object.values(ii?.query?.pages || {})[0]; cover = pg?.imageinfo?.[0]?.thumburl || pg?.imageinfo?.[0]?.url || null }
+    const cover = null
     if (res.length >= limit * 2) break
-    res.push({ src: 'wiki', score: 0.5, title: pickTitle(q, titles) || p.title, titles, platform: plats.includes('ns2') && !plats.includes('ps5') && !plats.includes('ns') ? 'ns2' : plats.includes('ps5') ? 'ps5' : plats.includes('ns') ? 'ns' : plats[0] || null, plats, cover, coverHost: 'wikipedia', wiki: `https://${p.L}.wikipedia.org/wiki/${encodeURIComponent(p.title)}` })
+    res.push({ L: p.L, img: p.img, src: 'wiki', score: 0.5, title: pickTitle(q, titles) || p.title, titles, platform: plats.includes('ns2') && !plats.includes('ps5') && !plats.includes('ns') ? 'ns2' : plats.includes('ps5') ? 'ps5' : plats.includes('ns') ? 'ns' : plats[0] || null, plats, cover, coverHost: 'wikipedia', wiki: `https://${p.L}.wikipedia.org/wiki/${encodeURIComponent(p.title)}` })
   }
+  // cover thumbnails: one batched imageinfo call per wiki language
+  await Promise.all([...new Set(res.map((r) => r.L))].map(async (L) => {
+    const rs = res.filter((r) => r.L === L && r.img); if (!rs.length) return
+    const d = await j(`https://${L}.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=imageinfo&iiprop=url&iiurlwidth=700&titles=${rs.map((r) => encodeURIComponent('File:' + r.img)).join('|')}`)
+    const byT = {}; for (const pg of Object.values(d?.query?.pages || {})) byT[pg.title.replace(/^[^:]+:/, '').replace(/ /g, '_')] = pg.imageinfo?.[0]?.thumburl || pg.imageinfo?.[0]?.url
+    for (const r of rs) r.cover = byT[r.img.replace(/ /g, '_')] || null
+  }))
   // rank by closeness to the query, then enrich from our catalog (better cover + exact platform) via the English label
   const nq = norm(q)
   for (const r of res) r.score = 0.5 * Math.max(...Object.values(r.titles).filter(Boolean).map((t) => score(nq, norm(t))), score(nq, norm(r.title)))
