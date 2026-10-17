@@ -21,7 +21,7 @@ import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import { ItemRotator } from '../demo/itemRotate.js'
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
 import { LightProbeGridWebGL } from 'three/examples/jsm/lighting/LightProbeGridWebGL.js'
-import { loadBakedCabinet } from './bakedCabinet.js'
+import { loadBakedCabinet, bakedOnly } from './bakedCabinet.js'
 import { loadCaseParts } from '../demo/caseModel.js'
 
 const BASE = import.meta.env.BASE_URL
@@ -182,9 +182,29 @@ function linenTex() {
 }
 const backMat = new THREE.MeshStandardMaterial({ map: linenTex(), color: 0xb3aa9d, roughness: 0.92 })
 // 10 mm float glass: faint green body, strong clearcoat reflections of the room env, green edges
-const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xeaf6f0, roughness: 0.03, metalness: 0, transparent: true, opacity: 0.22, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, envMapIntensity: 1.4, depthWrite: false })
-const glassEdge = new THREE.MeshPhysicalMaterial({ color: 0x6fb89a, roughness: 0.16, transparent: true, opacity: 0.85, clearcoat: 1, envMapIntensity: 1.2 })
-const doorGlass = new THREE.MeshPhysicalMaterial({ color: 0xf4fbf8, roughness: 0.02, transparent: true, opacity: 0.06, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, envMapIntensity: 1.6, depthWrite: false, side: THREE.DoubleSide })
+// Low-iron museum glass. Diffuse is black (no lit milky veil) and the blend is ONE / ONE_MINUS_SRC_ALPHA, so the
+// shader's specular (GGX + Fresnel on the gallery HDRI, F0≈4% → strong only at grazing angles) is ADDED unscaled while
+// what's behind is only dimmed by `opacity` (absorption). Single-sided (the GLB panes are closed boxes), no depth write,
+// never casts or receives shadows, never lightmapped → cases behind stay crisp and colour-accurate.
+function clearGlass(absorb, envI) {
+  // direct lights stripped (bakedOnly): the LED area lights' LTC specular otherwise lays a broad veil over the pane;
+  // the glass then shows only HDRI reflections, which is what museum glass in a dim room looks like
+  return bakedOnly(new THREE.MeshPhysicalMaterial({ color: 0x000000, roughness: 0, metalness: 0, ior: 1.52, specularIntensity: 1, envMapIntensity: envI,
+    transparent: true, opacity: absorb, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendEquation: THREE.AddEquation }))
+}
+// envMapIntensity < 1: the daylit gallery HDRI is far brighter than this dim room, so its 4 % normal-incidence
+// reflection would veil the cases; Fresnel still brings the reflection up strongly at grazing angles
+const glassMat = clearGlass(0.05, +(qs.get('ge') || 0.5))   // 10 mm shelves: a little more absorption
+// polished front edge of the shelf: the only place low-iron glass shows its faint aqua-green
+const glassEdge = new THREE.MeshPhysicalMaterial({ color: 0x8cc6ae, roughness: 0.04, transparent: true, opacity: 0.5, envMapIntensity: 1.2, depthWrite: false })
+const doorGlass = clearGlass(0.03, +(qs.get('de') || 0.25))  // 4 mm door panes
+if (qs.has('nopane')) doorGlass.visible = false // debug: reference view without door glass
+const doorGlassDS = doorGlass.clone(); doorGlassDS.side = THREE.DoubleSide // procedural fallback panes are single planes
+// thin bright line where the pane meets the frame opening (light caught by the glass edge)
+const glassLine = new THREE.MeshBasicMaterial({ color: 0xcfeee0, transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending })
+// glass must be invisible to GTAO: its normal/depth prepass ignores transparency, so a pane in front erased the
+// ambient occlusion of every case behind it (flat, washed-out look through closed doors)
+for (const m of [glassMat, glassEdge, doorGlass, doorGlassDS, glassLine, streakMat]) m.userData.noAO = true
 const brass = new THREE.MeshPhysicalMaterial({ color: 0xc9a46a, metalness: 1, roughness: 0.36, clearcoat: 0.2, clearcoatRoughness: 0.2 })
 const alu = new THREE.MeshPhysicalMaterial({ color: 0xb8bcc0, metalness: 1, roughness: 0.45 })
 // LED strip: opal diffuser with a soft cross-profile (bright core → dim edge) so the thin strip doesn't shimmer
@@ -238,8 +258,8 @@ function buildOne(ci) {
   for (const sx of [-1, 1]) {
     const pivot = new THREE.Group(); pivot.position.set(sx * (CW / 2 + FT * 0.5), PLINTH, CD / 2 + FT / 2 + 0.03); G.add(pivot)
     const dw = CW / 2 + FT * 0.5, door = new THREE.Group(); pivot.add(door)
-    const pane = plane(dw - 0.12, inH - 0.12, doorGlass, door, -sx * dw / 2, inH / 2, 0); pane.renderOrder = 3
-    const st = plane(dw - 0.12, inH - 0.12, streakMat, door, -sx * dw / 2, inH / 2, 0.003); st.renderOrder = 4
+    const pane = plane(dw - 0.12, inH - 0.12, doorGlassDS, door, -sx * dw / 2, inH / 2, 0); pane.renderOrder = 3; pane.castShadow = pane.receiveShadow = false
+    const st = plane(dw - 0.12, inH - 0.12, streakMat, door, -sx * dw / 2, inH / 2, 0.003); st.renderOrder = 4; st.visible = false // fake streak removed: reflections come from the HDRI Fresnel only
     box(dw, 0.075, 0.045, frameMat, door, -sx * dw / 2, 0.0375, 0, false, 0.01); box(dw, 0.075, 0.045, frameMat, door, -sx * dw / 2, inH - 0.0375, 0, false, 0.01)
     box(0.075, inH, 0.045, frameMatV, door, -sx * 0.0375, inH / 2, 0, false, 0.01); box(0.05, inH, 0.045, frameMatV, door, -sx * (dw - 0.025), inH / 2, 0, false, 0.01)
     for (const hy of [0.25, inH / 2, inH - 0.25]) { const h = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.12, 16), brass); h.position.set(0, hy, 0.0); door.add(h) }
@@ -658,7 +678,7 @@ function setupTier() {
     // EffectComposer bypasses the canvas MSAA → render into a 4× multisampled HDR target (WebGL2) instead
     const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: renderer.capabilities.isWebGL2 === false ? 0 : 4 })
     composer = new EffectComposer(renderer, rt); composer.addPass(new RenderPass(scene, camera))
-    if (tier === 'high') { gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); gtao.blendIntensity = 0.6; gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1, scale: 1 }); composer.addPass(gtao) }
+    if (tier === 'high') { gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); const ov = gtao._overrideVisibility.bind(gtao); gtao._overrideVisibility = function () { ov(); const c = this._visibilityCache; this.scene.traverse((o) => { if (o.isMesh && o.visible && o.material?.userData?.noAO) { o.visible = false; c.push(o) } }) }; gtao.blendIntensity = 0.6; gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1, scale: 1 }); composer.addPass(gtao) }
     bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.55, 1.6); composer.addPass(bloom)
     vignette = new ShaderPass(VignetteShader); composer.addPass(vignette); composer.addPass(new OutputPass())
     if (tier === 'high') composer.addPass(new SMAAPass()) // after tone mapping: cleans AO / specular edges MSAA can't see
@@ -1000,8 +1020,8 @@ async function boot() {
 // ---------------- baked assets (GLB + lightmaps), procedural fallback ----------------
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])
 const bakedReady = qs.has('procedural') ? Promise.resolve() : Promise.allSettled([
-  withTimeout(loadBakedCabinet({ renderer, base: BASE, mobile, lmGain: +(qs.get('lm') || 1), mats: { doorGlass, streakMat, glassMat, glassEdge, ledMat, brass } }), 20000)
-    .then((b) => { BAKED = b; useBakedLights(); doorGlass.envMapIntensity = +(qs.get('dg') || 0.25); doorGlass.clearcoat = 0.4; streakMat.opacity = 0.1; if (nCab) buildCabinets(nCab, true); console.info('[showcase] baked cabinet ready') })
+  withTimeout(loadBakedCabinet({ renderer, base: BASE, mobile, lmGain: +(qs.get('lm') || 1), mats: { doorGlass, streakMat, glassMat, glassEdge, glassLine, ledMat, brass } }), 20000)
+    .then((b) => { BAKED = b; useBakedLights(); if (nCab) buildCabinets(nCab, true); console.info('[showcase] baked cabinet ready') })
     .catch((err) => console.warn('[showcase] baked cabinet failed, using procedural', err)),
   withTimeout(loadCaseParts(BASE), 20000).then(() => { for (const k of Object.keys(models)) { models[k].dispose(); delete models[k] } useModel(sel?.platform || 'ps5') })
     .catch((err) => console.warn('[showcase] case GLB failed, using procedural case', err)),
