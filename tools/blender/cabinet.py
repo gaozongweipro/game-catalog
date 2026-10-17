@@ -74,6 +74,7 @@ brass, _ = principled('Brass', **{'Base Color': (0.78, 0.6, 0.34, 1), 'Metallic'
 glass, _ = principled('ShelfGlass', **{'Base Color': (0.9, 0.97, 0.94, 1), 'Roughness': 0.01, 'Transmission Weight': 1.0, 'IOR': 1.52})
 gedge, _ = principled('GlassEdge', **{'Base Color': (0.45, 0.72, 0.6, 1), 'Roughness': 0.12, 'Transmission Weight': 0.6, 'IOR': 1.52})
 led, _ = principled('LED', **{'Base Color': (1, 0.95, 0.88, 1), 'Emission Color': (1, 0.88, 0.72, 1), 'Emission Strength': 8.0})
+dedge, _ = principled('DoorEdge', **{'Base Color': (0.55, 0.8, 0.68, 1), 'Roughness': 0.05, 'Transmission Weight': 0.8, 'IOR': 1.52})
 dglass, _ = principled('DoorGlass', **{'Base Color': (0.95, 0.99, 0.97, 1), 'Roughness': 0.01, 'Transmission Weight': 1.0, 'IOR': 1.52})
 greym, _ = principled('Room', **{'Base Color': (0.32, 0.3, 0.28, 1), 'Roughness': 0.8})
 
@@ -121,19 +122,21 @@ for sx, nm in ((-1, 'DoorL'), (1, 'DoorR')):
     px, py, pz = sx * (CW / 2 + FT * 0.5), PLINTH, CD / 2 + FT / 2 + 0.03
     piv = link(bpy.data.objects.new(nm, None)); piv.location = T(px, py, pz); doors.append(piv)
     def at(x, y, z): return (px + x, py + y, pz + z)
-    fr = [tbox(nm + 'R1', dw, 0.075, 0.045, *at(-sx * dw / 2, 0.0375, 0), oak, 0.008), tbox(nm + 'R2', dw, 0.075, 0.045, *at(-sx * dw / 2, inH - 0.0375, 0), oak, 0.008),
-          tbox(nm + 'S1', 0.075, inH, 0.045, *at(-sx * 0.0375, inH / 2, 0), oak, 0.008), tbox(nm + 'S2', 0.05, inH, 0.045, *at(-sx * (dw - 0.025), inH / 2, 0), oak, 0.008)]
-    pane = tbox(nm + 'Pane', dw - 0.1, inH - 0.1, 0.008, *at(-sx * dw / 2, inH / 2, 0), dglass, 0.002, 1, 1)
+    # frameless low-iron tempered pane, 8 mm, overlays half the side frame, 3 mm gap at the centre (no stile)
+    PT, x_out, x_in = 0.08, sx * 0.06, -sx * (dw - 0.015)
+    pane = tbox(nm + 'Pane', abs(x_out - x_in), inH - 0.02, PT, *at((x_out + x_in) / 2, inH / 2, 0), dglass, 0.006, 1, 1)
+    pane.data.materials.append(dedge)   # polished edges (+ bevels) get the faint green edge material
+    for f in pane.data.polygons:
+        if abs(f.normal.y) < 0.9: f.material_index = 1
     br = []
-    for hy in (0.25, inH / 2, inH - 0.25):  # barrel hinge: 3 knuckles + finial caps + leaf on the frame
-        for k in (-1, 0, 1): br.append(tcyl('Kn', 0.014, 0.036, *at(0, hy + k * 0.04, 0.0), brass, 'Y', 20, 0.002))
-        br.append(tcyl('Cap', 0.009, 0.012, *at(0, hy + 0.066, 0), brass, 'Y', 16, 0.002)); br.append(tcyl('Cap', 0.009, 0.012, *at(0, hy - 0.066, 0), brass, 'Y', 16, 0.002))
-        br.append(tbox('Leaf', 0.03, 0.11, 0.004, *at(-sx * 0.02, hy, 0.024), brass, 0.001))
-    pxl = -sx * (dw - 0.11)
-    br.append(tcyl('Bar', 0.011, 0.62, *at(pxl, inH / 2, 0.08), brass, 'Y', 24, 0.003))
-    for oy in (0.27, -0.27):
-        br.append(tcyl('Post', 0.008, 0.06, *at(pxl, inH / 2 + oy, 0.05), brass, 'Z', 16, 0.002)); br.append(tcyl('Rose', 0.014, 0.006, *at(pxl, inH / 2 + oy, 0.0245), brass, 'Z', 20, 0.002))
-    for parts, suf in ((fr, 'Frame'), ([pane], 'Pane'), (br, 'Brass')):
+    for hy, sy in ((0.07, -1), (inH - 0.07, 1)):  # glass clamp pivot hinges at the outer corners + pivot pin into base / top
+        br.append(tbox('Clamp', 0.15, 0.11, PT + 0.05, *at(-sx * 0.035, hy, 0), brass, 0.012))
+        br.append(tcyl('Pin', 0.016, 0.07, *at(0, hy + sy * 0.09, 0), brass, 'Y', 20, 0.003))
+    kx = -sx * (dw - 0.1)    # slim brass knob on the glass near the centre edge
+    br.append(tcyl('Rose', 0.03, 0.008, *at(kx, inH / 2, PT / 2 + 0.004), brass, 'Z', 24, 0.002))
+    br.append(tcyl('Stem', 0.011, 0.04, *at(kx, inH / 2, PT / 2 + 0.028), brass, 'Z', 16, 0.002))
+    br.append(tcyl('Knob', 0.026, 0.03, *at(kx, inH / 2, PT / 2 + 0.062), brass, 'Z', 24, 0.009))
+    for parts, suf in (([pane], 'Pane'), (br, 'Brass')):
         o = join(parts, nm + suf) if len(parts) > 1 else parts[0]; o.name = nm + suf
         mw = o.matrix_world.copy(); o.parent = piv; o.matrix_parent_inverse = piv.matrix_world.inverted(); o.matrix_world = mw
 log('doors')

@@ -205,11 +205,13 @@ const glassEdge = new THREE.MeshPhysicalMaterial({ color: 0x8cc6ae, roughness: 0
 const doorGlass = clearGlass(0.03, +(qs.get('de') || 0.25))  // 4 mm door panes
 if (qs.has('nopane')) doorGlass.visible = false // debug: reference view without door glass
 const doorGlassDS = doorGlass.clone(); doorGlassDS.side = THREE.DoubleSide // procedural fallback panes are single planes
-// thin bright line where the pane meets the frame opening (light caught by the glass edge)
+// polished edges of the frameless 8 mm door panes: the only place the low-iron glass shows its faint green
+const doorEdge = new THREE.MeshPhysicalMaterial({ color: 0xb4ddcb, roughness: 0.05, transparent: true, opacity: 0.4, envMapIntensity: 1.2, depthWrite: false })
+// thin edge highlight along the pane edges (light caught by the polished glass edge)
 const glassLine = new THREE.MeshBasicMaterial({ color: 0xcfeee0, transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending })
 // glass must be invisible to GTAO: its normal/depth prepass ignores transparency, so a pane in front erased the
 // ambient occlusion of every case behind it (flat, washed-out look through closed doors)
-for (const m of [glassMat, glassEdge, doorGlass, doorGlassDS, glassLine, streakMat]) m.userData.noAO = true
+for (const m of [glassMat, glassEdge, doorGlass, doorGlassDS, doorEdge, glassLine, streakMat]) m.userData.noAO = true
 const brass = new THREE.MeshPhysicalMaterial({ color: 0xc9a46a, metalness: 1, roughness: 0.36, clearcoat: 0.2, clearcoatRoughness: 0.2 })
 const doors = []
 let shelfY = []
@@ -257,13 +259,13 @@ function buildOne(ci) {
   for (const sx of [-1, 1]) {
     const pivot = new THREE.Group(); pivot.position.set(sx * (CW / 2 + FT * 0.5), PLINTH, CD / 2 + FT / 2 + 0.03); G.add(pivot)
     const dw = CW / 2 + FT * 0.5, door = new THREE.Group(); pivot.add(door)
-    const pane = plane(dw - 0.12, inH - 0.12, doorGlassDS, door, -sx * dw / 2, inH / 2, 0); pane.renderOrder = 3; pane.castShadow = pane.receiveShadow = false
-    const st = plane(dw - 0.12, inH - 0.12, streakMat, door, -sx * dw / 2, inH / 2, 0.003); st.renderOrder = 4; st.visible = false // fake streak removed: reflections come from the HDRI Fresnel only
-    box(dw, 0.075, 0.045, frameMat, door, -sx * dw / 2, 0.0375, 0, false, 0.01); box(dw, 0.075, 0.045, frameMat, door, -sx * dw / 2, inH - 0.0375, 0, false, 0.01)
-    box(0.075, inH, 0.045, frameMatV, door, -sx * 0.0375, inH / 2, 0, false, 0.01); box(0.05, inH, 0.045, frameMatV, door, -sx * (dw - 0.025), inH / 2, 0, false, 0.01)
-    for (const hy of [0.25, inH / 2, inH - 0.25]) { const h = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.12, 16), brass); h.position.set(0, hy, 0.0); door.add(h) }
-    const pull = new THREE.Group(); door.add(pull); pull.position.set(-sx * (dw - 0.11), inH / 2, 0.05)
-    box(0.022, 0.6, 0.022, brass, pull, 0, 0, 0.03, false, 0.008); box(0.02, 0.02, 0.05, brass, pull, 0, 0.27, 0.005, false); box(0.02, 0.02, 0.05, brass, pull, 0, -0.27, 0.005, false)
+    // frameless 8 mm low-iron pane (no stiles/rails), 3 mm centre gap, clamp pivot hinges + slim knob (same as cabinet.py)
+    const PT = 0.08, xo = sx * 0.06, xi = -sx * (dw - 0.015), pw = Math.abs(xo - xi)
+    const pane = new THREE.Mesh(new THREE.BoxGeometry(pw, inH - 0.02, PT), [doorEdge, doorEdge, doorEdge, doorEdge, doorGlass, doorGlass]); pane.position.set((xo + xi) / 2, inH / 2, 0); pane.renderOrder = 3; door.add(pane)
+    for (const [lx, ly, lw, lh] of [[0, -1, 1, 0], [0, 1, 1, 0], [-1, 0, 0, 1], [1, 0, 0, 1]]) { const l = new THREE.Mesh(new THREE.PlaneGeometry(lw ? pw - 0.012 : 0.004, lh ? inH - 0.032 : 0.004), glassLine); l.position.set((xo + xi) / 2 + lx * (pw / 2 - 0.006), inH / 2 + ly * ((inH - 0.02) / 2 - 0.006), PT / 2 + 0.001); l.renderOrder = 4; door.add(l) }
+    for (const [hy, sy] of [[0.07, -1], [inH - 0.07, 1]]) { box(0.15, 0.11, PT + 0.05, brass, door, -sx * 0.035, hy, 0, false, 0.012); const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.07, 16), brass); pin.position.set(0, hy + sy * 0.09, 0); door.add(pin) }
+    const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.03, 24), brass); knob.rotation.x = Math.PI / 2; knob.position.set(-sx * (dw - 0.1), inH / 2, PT / 2 + 0.062); door.add(knob)
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.05, 12), brass); stem.rotation.x = Math.PI / 2; stem.position.set(-sx * (dw - 0.1), inH / 2, PT / 2 + 0.025); door.add(stem)
     pivot.userData = { sx, ci }; doors.push(pivot)
   }
   return G
@@ -1031,13 +1033,13 @@ async function boot() {
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, glb: () => model.glbParts, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  window.__sc = { vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, glb: () => model.glbParts, door: (v) => { doorTarget = v; dirty = 3 }, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 // ---------------- baked assets (GLB + lightmaps), procedural fallback ----------------
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])
 const bakedReady = qs.has('procedural') ? Promise.resolve() : Promise.allSettled([
-  withTimeout(loadBakedCabinet({ renderer, base: BASE, mobile, lmGain: +(qs.get('lm') || 1), mats: { doorGlass, streakMat, glassMat, glassEdge, glassLine, brass } }), 20000)
+  withTimeout(loadBakedCabinet({ renderer, base: BASE, mobile, lmGain: +(qs.get('lm') || 1), mats: { doorGlass, streakMat, glassMat, glassEdge, glassLine, doorEdge, brass } }), 20000)
     .then((b) => { BAKED = b; useBakedLights(); if (nCab) buildCabinets(nCab, true); console.info('[showcase] baked cabinet ready') })
     .catch((err) => console.warn('[showcase] baked cabinet failed, using procedural', err)),
   withTimeout(loadCaseParts(BASE), 20000).then(() => { for (const k of Object.keys(models)) { models[k].dispose(); delete models[k] } useModel(sel?.platform || 'ps5') })

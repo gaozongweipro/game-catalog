@@ -50,6 +50,7 @@ export async function loadBakedCabinet({ renderer, base, mobile, mats, lmGain = 
       case 'ShelfGlass': return mats.glassMat
       case 'GlassEdge': return mats.glassEdge
       case 'DoorGlass': return mats.doorGlass
+      case 'DoorEdge': return mats.doorEdge
       default: return m
     }
   }
@@ -59,13 +60,13 @@ export async function loadBakedCabinet({ renderer, base, mobile, mats, lmGain = 
     let door = false; for (let p = o; p && p !== proto; p = p.parent) if (p.name.startsWith('Door')) door = true
     o.material = byName(o.material, door); const isStatic = !door
     if (o.material === mats.glassMat || o.material === mats.glassEdge) { o.renderOrder = o.material === mats.glassEdge ? 2 : 1; o.castShadow = false; o.receiveShadow = false }
+    else if (o.material === mats.doorEdge) { o.renderOrder = 3; o.castShadow = o.receiveShadow = false }
     else if (o.material === mats.doorGlass) {
       o.renderOrder = 3; o.castShadow = o.receiveShadow = false; o.geometry.computeBoundingBox(); const bb = o.geometry.boundingBox
-      // edge glints along the visible frame opening (pane runs 25 mm under rails / hinge stile, flush at the meeting stile)
-      let left = true; for (let p = o; p; p = p.parent) if (p.name === 'DoorR') left = false
-      const IN = 0.025, w = 0.003, z = bb.max.z + 0.0015, x0 = bb.min.x + (left ? IN : 0), x1 = bb.max.x - (left ? 0 : IN), y0 = bb.min.y + IN, y1 = bb.max.y - IN
+      // frameless pane: a hairline glint just inside all four polished edges of the front face
+      const w = 0.004, z = bb.max.z + 0.001, x0 = bb.min.x + 0.006, x1 = bb.max.x - 0.006, y0 = bb.min.y + 0.006, y1 = bb.max.y - 0.006
       const line = (cx, cy, lw, lh) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(lw, lh), mats.glassLine); m.position.set(cx, cy, z); m.renderOrder = 4; m.castShadow = false; o.add(m) }
-      line((x0 + x1) / 2, y0, x1 - x0, w); line((x0 + x1) / 2, y1, x1 - x0, w); line(left ? x0 : x1, (y0 + y1) / 2, w, y1 - y0)
+      line((x0 + x1) / 2, y0, x1 - x0, w); line((x0 + x1) / 2, y1, x1 - x0, w); line(x0, (y0 + y1) / 2, w, y1 - y0); line(x1, (y0 + y1) / 2, w, y1 - y0)
     }
     else { o.castShadow = true; o.receiveShadow = !isStatic }
   })
