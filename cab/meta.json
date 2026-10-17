@@ -1,0 +1,32 @@
+{
+ "lightScale": 1.6778072242736828,
+ "lighting": {
+  "uplights": {
+   "perCompartmentW": 120,
+   "size": [
+    4.9,
+    0.025
+   ],
+   "z": 0.835,
+   "aboveFloor": 0.028,
+   "tiltDeg": 12,
+   "color": [
+    1.0,
+    0.76,
+    0.52
+   ],
+   "note": "concealed behind 55 mm oak front rail, aimed at back panel"
+  },
+  "washers": {
+   "W": 350,
+   "halfAngle": 0.32
+  },
+  "down": {
+   "W": 490
+  },
+  "world": 0.02,
+  "samples": 128,
+  "res": 2048,
+  "denoise": "OIDN"
+ }
+}

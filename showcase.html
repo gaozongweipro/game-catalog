@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#f3f1ec" />
+<title>3D 陈列柜 · 3D Showcase</title>
+<link rel="icon" type="image/svg+xml" href="/game-catalog/favicon.svg" />
+  <script type="module" crossorigin src="/game-catalog/assets/showcase-BqFiH4f1.js"></script>
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/modulepreload-polyfill-P2Xu9kJm.js">
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/art-OLVUY_Re.js">
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/gen-qsiFRjYk.js">
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/RoundedBoxGeometry-B0PlWiQ8.js">
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/Pass-BSrmq3TZ.js">
+  <link rel="stylesheet" crossorigin href="/game-catalog/assets/showcase-DzPWhSEU.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+<header class="bar">
+  <a id="back" class="pill" href="./">←</a>
+  <div class="brand"><b id="brandT">陈列柜</b><span id="brandS">我的电子实体版</span></div>
+  <div class="tools">
+    <div class="seg" id="viewSeg" role="group"><button data-v="spine" aria-pressed="true" id="vSpine">书脊</button><button data-v="front" aria-pressed="false" id="vFront">正面</button></div>
+    <button class="pill" id="menuBtn" aria-label="menu">⋯</button>
+    <button class="pill" id="langBtn">EN</button>
+  </div>
+  <div class="menu hidden" id="menu">
+    <button id="mExport">导出收藏</button>
+    <button id="mImport">导入收藏</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden />
+  </div>
+</header>
+<div class="shelfbar" id="shelfbar">
+  <input id="q" type="search" placeholder="搜索 / Search" autocomplete="off" />
+  <div class="seg" id="pf"><button data-p="all" aria-pressed="true">全部</button><button data-p="ps5" aria-pressed="false">PS5</button><button data-p="ns" aria-pressed="false">NS</button><button data-p="ns2" aria-pressed="false">NS2</button></div>
+  <select id="sort"><option value="custom">自定义顺序</option><option value="name">名称</option><option value="date">日期</option><option value="platform">平台</option></select>
+  <div class="pager hidden" id="pager"><button id="pgPrev" aria-label="prev">‹</button><span id="pgLbl">1 / 1</span><select id="pgJump" aria-label="jump"></select><button id="pgNext" aria-label="next">›</button></div>
+</div>
+<button class="fab" id="makeBtn"><span>＋</span><em id="makeT">制作</em></button>
+
+<div class="loading" id="loading"><div class="spin"></div><p id="loadT">正在布置展柜…</p></div>
+<div class="empty hidden" id="empty"><div class="card"><div class="glyph">▢</div><h2 id="emptyH">展柜还是空的</h2><p id="emptyP">上传封面，制作你的第一张电子实体版</p><button class="primary" id="emptyBtn">开始制作</button></div></div>
+
+<section class="inspect hidden" id="inspect">
+  <div class="ihead"><h2 id="iTitle"></h2><p id="iSub"></p></div>
+  <div class="ibar">
+    <button id="iBack" class="ghost">← <span id="iBackT">放回展柜</span></button>
+    <button id="iOpen" class="primary">打开</button>
+    <button id="iDisc" class="accent">取盘</button>
+    <button id="iFlip" class="ghost hidden">翻面</button>
+    <button id="iSheet" class="ghost">抽出封面</button>
+    <button id="iReset" class="ghost">复位</button>
+    <button id="iMore" class="ghost" aria-label="more">⋯</button>
+  </div>
+  <div class="imore hidden" id="imore">
+    <button id="iEdit">编辑</button><button id="iLeft">前移</button><button id="iRight">后移</button><button id="iDel" class="danger">删除</button>
+  </div>
+</section>
+
+<section class="editor hidden" id="editor" aria-label="editor">
+  <div class="grab"></div>
+  <div class="ehead"><h2 id="eTitleH">制作电子实体版</h2><button class="ghost" id="eCancel">取消</button><button class="primary" id="eSave">保存</button></div>
+  <div class="ebody" id="ebody">
+    <label class="field"><span id="lTitle">游戏名称</span><input id="fTitle" maxlength="80" autocomplete="off" placeholder="中 / 日 / 英文游戏名，可选" /></label>
+    <div class="sugg hidden" id="sugg"></div>
+    <div class="row">
+      <div class="seg plat" id="platSeg"><button aria-pressed="true" data-p="ps5">PS5</button><button aria-pressed="false" data-p="ns">Switch</button><button aria-pressed="false" data-p="ns2">Switch 2</button></div>
+      <label class="switch"><input type="checkbox" id="fBand" checked /><span id="lBand">PS5 顶条</span></label>
+      <label class="switch hidden" id="keyWrap"><input type="checkbox" id="fKey" /><span id="lKey">Game-Key Card</span></label>
+    </div>
+    <p class="note" id="platNote"></p>
+    <div class="slots" id="slots"></div>
+    <p class="note" id="slotNote">只需上传正面封面，其余会自动生成；点卡片可上传或裁切。</p>
+  </div>
+  <div class="crop hidden" id="crop">
+    <div class="chead"><b id="cTitle"></b><span id="cHint">拖动移动 · 双指或滚轮缩放</span></div>
+    <div class="cwrap" id="cwrap"><canvas id="cc"></canvas></div>
+    <div class="cctl">
+      <input type="range" id="cZoom" min="1" max="4" step="0.01" value="1" />
+      <button class="ghost" id="cReset">重置</button><button class="ghost" id="cReplace">换图</button><button class="ghost" id="cRemove">移除</button><button class="primary" id="cDone">完成</button>
+    </div>
+  </div>
+  <input type="file" id="fileIn" accept="image/*" hidden />
+</section>
+<div class="toast hidden" id="toast"></div>
+</body>
+</html>
