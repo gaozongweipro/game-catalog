@@ -7,7 +7,7 @@ import * as THREE from 'three'
  */
 export class ItemRotator {
   constructor(dom, camera, o = {}) {
-    Object.assign(this, { dom, camera, enabled: false, yaw: 0, pitch: 0, vy: 0, vp: 0, zoom: 0, zoomT: 0, pan: new THREE.Vector2(), panT: new THREE.Vector2(),
+    Object.assign(this, { dom, camera, enabled: false, yaw: 0, pitch: 0, yawT: 0, pitchT: 0, vy: 0, vp: 0, zoom: 0, zoomT: 0, pan: new THREE.Vector2(), panT: new THREE.Vector2(),
       pitchMax: o.pitchMax ?? 1.35, zoomMin: o.zoomMin ?? -0.45, zoomMax: o.zoomMax ?? 0.55, panMax: o.panMax ?? 0.35, speed: o.speed ?? 0.0085, resetting: false, dragging: false, onInput: o.onInput || (() => {}) })
     this.ptrs = new Map(); this._last = 0
     const opt = { passive: false }
@@ -17,7 +17,7 @@ export class ItemRotator {
     dom.addEventListener('contextmenu', (e) => { if (this.enabled) e.preventDefault() })
     dom.style.touchAction = 'none'
   }
-  _down(e) { if (!this.enabled) return; this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, b: e.button, sh: e.shiftKey }); this.dragging = true; this.resetting = false; this.vy = this.vp = 0; this._last = performance.now(); this._pinch = null }
+  _down(e) { if (!this.enabled) return; try { this.dom.setPointerCapture(e.pointerId) } catch {} this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, b: e.button, sh: e.shiftKey }); this.dragging = true; this.resetting = false; this.vy = this.vp = 0; this._last = performance.now(); this._pinch = null }
   _move(e) {
     const p = this.ptrs.get(e.pointerId); if (!p || !this.enabled) return
     const dx = e.clientX - p.x, dy = e.clientY - p.y, now = performance.now(), dts = Math.max(8, now - this._last) / 1000
@@ -30,26 +30,33 @@ export class ItemRotator {
     }
     if (p.b === 2 || p.sh) { this._panBy(dx / h, dy / h); this.onInput(); return }
     const ay = dx * this.speed, ap = dy * this.speed
-    this.yaw += ay; this.pitch = THREE.MathUtils.clamp(this.pitch + ap, -this.pitchMax, this.pitchMax)
+    // pointer events only move the TARGET; the rendered pose follows it in rAF with frame-time damping (smooth on uneven event rates)
+    this.yawT += ay; this.pitchT = THREE.MathUtils.clamp(this.pitchT + ap, -this.pitchMax, this.pitchMax)
     this.vy = THREE.MathUtils.lerp(this.vy, ay / dts, 0.5); this.vp = THREE.MathUtils.lerp(this.vp, ap / dts, 0.5); this.onInput()
   }
   _panBy(x, y) { this.panT.x = THREE.MathUtils.clamp(this.panT.x + x * 1.4, -this.panMax, this.panMax); this.panT.y = THREE.MathUtils.clamp(this.panT.y - y * 1.4, -this.panMax * 0.7, this.panMax * 0.7) }
   _up(e) { if (!this.ptrs.delete(e.pointerId)) return; this._pinch = null; if (!this.ptrs.size) { this.dragging = false; if (performance.now() - this._last > 90) this.vy = this.vp = 0 } }
   /** animated return to the default pose */
-  reset() { this.resetting = true; this.vy = this.vp = 0; this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw)) }
-  resetNow() { this.yaw = this.pitch = this.vy = this.vp = this.zoom = this.zoomT = 0; this.pan.set(0, 0); this.panT.set(0, 0); this.resetting = false }
-  get idle() { return Math.abs(this.yaw) + Math.abs(this.pitch) + Math.abs(this.zoom) + this.pan.length() < 0.002 }
+  reset() { this.resetting = true; this.vy = this.vp = 0; const w = Math.atan2(Math.sin(this.yawT), Math.cos(this.yawT)); this.yaw += w - this.yawT; this.yawT = w }
+  /** set pose directly (tests / deep links) */
+  set(y, p = 0) { this.yaw = this.yawT = y; this.pitch = this.pitchT = p; this.vy = this.vp = 0; this.resetting = false }
+  resetNow() { this.yaw = this.pitch = this.yawT = this.pitchT = this.vy = this.vp = this.zoom = this.zoomT = 0; this.pan.set(0, 0); this.panT.set(0, 0); this.resetting = false }
+  get idle() { return Math.abs(this.yaw) + Math.abs(this.pitch) + Math.abs(this.yawT) + Math.abs(this.pitchT) + Math.abs(this.zoom) + this.pan.length() < 0.002 }
+  /** user is interacting or the item is still settling (inertia / damping / reset) */
+  get active() { return this.dragging || this.resetting || this.vy !== 0 || this.vp !== 0 || Math.abs(this.yawT - this.yaw) + Math.abs(this.pitchT - this.pitch) > 1e-4 }
   /** advance inertia / damping; returns true while anything is still moving */
   update(dt) {
     const y0 = this.yaw, p0 = this.pitch, z0 = this.zoom, px0 = this.pan.x, py0 = this.pan.y
     if (this.resetting) {
-      const k = 1 - Math.exp(-dt * 7); this.yaw *= 1 - k; this.pitch *= 1 - k; this.zoomT = 0; this.panT.set(0, 0)
-      if (Math.abs(this.yaw) + Math.abs(this.pitch) < 1e-3) { this.yaw = this.pitch = 0; this.resetting = false }
+      const k = 1 - Math.exp(-dt * 7); this.yawT *= 1 - k; this.pitchT *= 1 - k; this.zoomT = 0; this.panT.set(0, 0)
+      if (Math.abs(this.yawT) + Math.abs(this.pitchT) + Math.abs(this.yaw) + Math.abs(this.pitch) < 1e-3) { this.yaw = this.pitch = this.yawT = this.pitchT = 0; this.resetting = false }
     } else if (!this.dragging) {
-      this.yaw += this.vy * dt; this.pitch += this.vp * dt
-      if (Math.abs(this.pitch) > this.pitchMax) { this.pitch = Math.sign(this.pitch) * this.pitchMax; this.vp = 0 }
+      this.yawT += this.vy * dt; this.pitchT += this.vp * dt
+      if (Math.abs(this.pitchT) > this.pitchMax) { this.pitchT = Math.sign(this.pitchT) * this.pitchMax; this.vp = 0 }
       const d = Math.exp(-dt * 4.5); this.vy *= d; this.vp *= d; if (Math.abs(this.vy) + Math.abs(this.vp) < 0.01) this.vy = this.vp = 0
     }
+    const f = 1 - Math.exp(-dt * 22); this.yaw += (this.yawT - this.yaw) * f; this.pitch += (this.pitchT - this.pitch) * f
+    if (Math.abs(this.yawT - this.yaw) + Math.abs(this.pitchT - this.pitch) < 1e-5) { this.yaw = this.yawT; this.pitch = this.pitchT }
     const k = 1 - Math.exp(-dt * 10); this.zoom += (this.zoomT - this.zoom) * k; this.pan.lerp(this.panT, k)
     return Math.abs(this.yaw - y0) + Math.abs(this.pitch - p0) + Math.abs(this.zoom - z0) + Math.abs(this.pan.x - px0) + Math.abs(this.pan.y - py0) > 1e-5
   }

@@ -161,10 +161,10 @@ function syncUI() {
   ui.lang.textContent = t.lang; applyEnv()
   ui.bReset.textContent = t.reset
   ui.bOpen.textContent = openTarget ? t.close : t.open
-  ui.bOpen.disabled = !!(outTarget || out > 0.02 || discFocus || hubPressTarget || sheetT || sheetK > 0)
-  ui.bSheet.textContent = sheetT ? t.sheetIn : t.sheetOut; ui.bSheet.disabled = !sheetT && !canSheet()
+  ui.bOpen.disabled = !canOpen()
+  ui.bSheet.textContent = sheetT ? t.sheetIn : t.sheetOut; ui.bSheet.disabled = (!sheetT && (!canSheet() || sheetK > 0)) || (sheetT && sheetK < 1)
   ui.bDisc.textContent = (outTarget || discFocus) ? t.put : t.take
-  ui.bDisc.disabled = (!(openTarget && open > 0.65) && !discFocus && !(out > 0.5)) || sheetK > 0
+  ui.bDisc.disabled = (!(openTarget && open > 0.65) && !discFocus && !(out > 0.5)) || (sheetK > 0 && !sheetDock)
   // Browse toggles disc-focus when disc is already out
   ui.bBrowse.classList.toggle('hidden', !(out > 0.85 || discFocus))
   ui.bBrowse.disabled = out < 0.85 && !discFocus
@@ -172,11 +172,12 @@ function syncUI() {
   ui.bFlip.textContent = t.flip; ui.bFlip.classList.toggle('hidden', !discFocus)
   document.body.classList.toggle('disc-focus', discFocus)
 }
-function canOpen() { return !(outTarget || out > 0.02 || discFocus || hubPressTarget || sheetT || sheetK > 0) }
-let sheetK = 0, sheetT = 0, rotObj = 'case'
+function canOpen() { return !(outTarget || out > 0.02 || discFocus || hubPressTarget || (sheetT && sheetK < 1) || (!sheetT && sheetK > 0)) }
+let sheetK = 0, sheetT = 0, rotObj = 'case', sheetDock = false, dockK = 0, pendingSheetIn = false, discAway = 0
 function canSheet() { return !(openTarget || open > 0.01 || outTarget || out > 0.01 || hubPressTarget || discFocus) }
 function toggleOpen() {
   if (!canOpen()) return
+  if (sheetT) sheetDock = true // sheet out → park it so the case can be used
   openTarget = openTarget ? 0 : 1; rot.reset()
   syncUI()
 }
@@ -215,7 +216,8 @@ ui.bBrowse.onclick = () => { if (discFocus) exitDiscFocus(); else enterDiscFocus
 ui.lang.onclick = () => { lang = lang === 'en' ? 'zh' : 'en'; try { localStorage.setItem('game-catalog-lang', lang) } catch {}; syncUI() }
 q('bEnv').onclick = () => { envName = ENV_KEYS[(ENV_KEYS.indexOf(envName) + 1) % ENV_KEYS.length]; applyEnv() }
 ui.bReset.onclick = () => { rot.reset(); if (controls.enabled) { resetT = 1; userMoved = false } }
-ui.bSheet.onclick = () => { if (sheetT) sheetT = 0; else if (canSheet()) sheetT = 1; else return; rot.reset(); syncUI() }
+function putSheetBack() { rot.reset(); if (!canSheet()) { pendingSheetIn = true; sheetDock = true; if (discFocus || outTarget) reseatDisc(); openTarget = 0 } else { sheetDock = false; sheetT = 0 } syncUI() }
+ui.bSheet.onclick = () => { if (sheetT) putSheetBack(); else if (canSheet()) { sheetT = 1; sheetDock = false; rot.reset(); syncUI() } }
 let flip = 0, flipT = 0
 ui.bFlip.onclick = () => { flipT = flipT ? 0 : 1 }
 q('back').href = BASE; q('toShowcase').href = BASE + 'showcase.html'; q('toShowcase').textContent = lang === 'en' ? '3D Showcase' : '3D 陈列柜'
@@ -254,7 +256,8 @@ canvas.addEventListener('pointerup', (e) => {
     // Secondary only: tapping disc face also triggers hub press (not primary path)
     pressHubRelease(); return
   }
-  if (sheetT || sheetK > 0) return
+  if (sheetDock && sheetK >= 1 && canSheet() && ray.intersectObject(model.sheetG, true).length) { sheetDock = false; rot.reset(); syncUI(); return }
+  if (sheetK > 0 && !sheetDock) return
   if (isCover(o) && canOpen()) { toggleOpen(); return }
   if (!openTarget && canOpen()) toggleOpen()
 })
@@ -272,7 +275,7 @@ const step = (v, t, dt, dur) => (t > v ? Math.min(t, v + dt / dur) : Math.max(t,
 const HINGE_MAX = THREE.MathUtils.degToRad(178) // book open — almost flat
 const clock = new THREE.Clock()
 const _lift = new THREE.Vector3()
-const _tmp = new THREE.Vector3(), _ctr = new THREE.Vector3(), _sp = new THREE.Vector3(), _rq = new THREE.Quaternion(), _qI = new THREE.Quaternion(), _sq = new THREE.Quaternion(), _sM = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _qY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
+const _dock = new THREE.Vector3(), _tmp = new THREE.Vector3(), _ctr = new THREE.Vector3(), _sp = new THREE.Vector3(), _rq = new THREE.Quaternion(), _qI = new THREE.Quaternion(), _sq = new THREE.Quaternion(), _sM = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _qY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
 let releaseArmed = false
 let reseating = false
 let lastUiKey = ''
@@ -306,20 +309,22 @@ function tick() {
   spineG.rotation.y = -oe * HINGE_MAX / 2
   coverHinge.rotation.y = -oe * HINGE_MAX / 2
   // ---- item rotation (camera fixed) + cover-sheet pull-out
-  sheetK = step(sheetK, sheetT, dt, 2.2)
+  sheetK = step(sheetK, sheetT, dt, 2.2); dockK = step(dockK, sheetDock ? 1 : 0, dt, 0.7)
+  if (pendingSheetIn && open < 0.01 && !openTarget && out < 0.01 && !outTarget) { pendingSheetIn = false; sheetDock = false; sheetT = 0; syncUI() }
   rot.update(dt)
-  const act = discFocus ? 'disc' : sheetK > 0.34 ? 'sheet' : 'case'
+  const act = discFocus ? 'disc' : sheetK > 0.34 && !sheetDock ? 'sheet' : 'case'
   if (act !== rotObj) { rotObj = act; rot.resetNow() }
   rot.quaternion(_rq)
-  caseAway += (Math.max(discFocus ? 1 : 0, THREE.MathUtils.smoothstep(sheetK, 0.4, 0.9)) - caseAway) * (1 - Math.exp(-dt * 4))
+  caseAway += (Math.max(discFocus ? 1 : 0, sheetDock ? 0 : THREE.MathUtils.smoothstep(sheetK, 0.4, 0.9)) - caseAway) * (1 - Math.exp(-dt * 4))
+  discAway += ((discFocus ? 1 : 0) - discAway) * (1 - Math.exp(-dt * 4)) // card enlargement follows the CARD focus only
   root.quaternion.copy(act === 'case' ? _rq : _qI)
   _ctr.set(0, H / 2 + 0.0005, 0) // open book stays centred: pivot = centre of the opened spread
   root.position.copy(_ctr).sub(_tmp.set(-0.62 * oe, 0, 0).applyQuaternion(root.quaternion)).add(_tmp.set(-caseAway * 7, 0, 0))
   if (act === 'case') root.position.add(rot.offset(_ctr, _tmp))
   if (sheetK > 0) {
-    const P = _sp.copy(TARGET).add(_tmp.set(0, 0.1, 0)); if (act === 'sheet') P.add(rot.offset(P, _tmp))
+    const P = _sp.copy(TARGET).add(_tmp.set(0, 0.1, 0)).lerp(_dock.set(-1.25, 1.55, -0.9), easeIO(dockK)); if (act === 'sheet') P.add(rot.offset(P, _tmp))
     const dist = camera.position.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
-    const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.66 * vh) / model.sheetSize.h)
+    const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.66 * vh) / model.sheetSize.h) * (1 - 0.6 * easeIO(dockK))
     _sM.lookAt(camera.position, P, _up); _sq.setFromRotationMatrix(_sM).multiply(_qY180); if (act === 'sheet') _sq.premultiply(_rq)
     _sM.compose(P, _sq, _tmp.setScalar(fit)); model.setSheet(sheetK, _sM)
   } else model.setSheet(0)
@@ -385,9 +390,8 @@ function tick() {
   // Slightly push case back visually when focusing disc
   // case slides away + hides so the disc is inspected standalone
   const away = THREE.MathUtils.clamp((e - 0.35) / 0.65, 0, 1) * (discFocus || outTarget ? 1 : 0)
-  caseAway += ((discFocus ? 1 : 0) - caseAway) * (1 - Math.exp(-dt * 4))
-  root.visible = !(discFocus && caseAway > 0.97)
-  if (model.kind === 'cart') disc.scale.setScalar(1 + 1.8 * caseAway)
+  root.visible = true // moved aside, never hidden (a docked sheet lives in the case group)
+  if (model.kind === 'cart') disc.scale.setScalar(1 + 1.8 * discAway)
   blob.visible = root.visible
   discLights.forEach((l) => (l.visible = discFocus))
   blob.position.x = root.position.x
@@ -424,7 +428,7 @@ function tick() {
     }
   }
 
-  const uiKey = `${sheetK > 0}|${sheetT}|${open > 0.65}|${openTarget}|${out > 0.02}|${out > 0.5}|${out > 0.85}|${outTarget}|${hubPressTarget}|${discFocus}`
+  const uiKey = `${sheetK > 0}|${sheetK >= 1}|${sheetT}|${sheetDock}|${open > 0.65}|${openTarget}|${out > 0.02}|${out > 0.5}|${out > 0.85}|${outTarget}|${hubPressTarget}|${discFocus}`
   if (uiKey !== lastUiKey) { lastUiKey = uiKey; syncUI() }
 
   controls.update()
@@ -434,8 +438,8 @@ renderer.setAnimationLoop(tick)
 document.addEventListener('visibilitychange', () => renderer.setAnimationLoop(document.hidden ? null : tick))
 addEventListener('pagehide', () => { renderer.setAnimationLoop(null); envRT.dispose(); renderer.dispose() })
 syncUI()
-window.__box = () => ({ open: +open.toFixed(2), hubPress: +hubPress.toFixed(2), out: +out.toFixed(2), discFocus, sheet: +sheetK.toFixed(2), yaw: +rot.yaw.toFixed(2), obj: rotObj, cam: camera.position.toArray().map((v) => +v.toFixed(4)) })
-window.__boxRot = (y, p) => { rot.yaw = y; rot.pitch = p || 0; rot.vy = rot.vp = 0 }
+window.__box = () => ({ kids: root.children.length, sheetKids: model.sheetG.children.length, dock: sheetDock, discScale: +disc.scale.x.toFixed(2), open: +open.toFixed(2), hubPress: +hubPress.toFixed(2), out: +out.toFixed(2), discFocus, sheet: +sheetK.toFixed(2), yaw: +rot.yaw.toFixed(2), obj: rotObj, cam: camera.position.toArray().map((v) => +v.toFixed(4)) })
+window.__boxRot = (y, p) => rot.set(y, p || 0)
 window.__hubScreen = () => { const v = new THREE.Vector3(); btn.getWorldPosition(v); v.project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] }
 
 // Query helpers for screenshots / deep links

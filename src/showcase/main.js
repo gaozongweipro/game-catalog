@@ -418,7 +418,10 @@ function inspectPose() { const c = cabinetCenter(); INS.set(0, Math.min(c.y, 2.4
 let mode = 'shelf' // shelf | fly | inspect | back | editor
 let sel = null, flyT = 0, flyFrom = null
 let open = 0, openT = 0, hubP = 0, hubT = 0, out = 0, outT = 0, discFocus = false, flip = 0, flipT = 0, spin = 0, releaseArmed = false, reseating = false
-let dirty = 3, pending = null, sheetK = 0, sheetT = 0, rotObj = 'case', caseAway = 0
+let dirty = 3, pending = null, sheetK = 0, sheetT = 0, rotObj = 'case', caseAway = 0, sheetDock = false, dockK = 0, pendingSheetIn = false
+const DOCK_OFF = new THREE.Vector3(-1.55, 0.62, -0.7), _dockP = new THREE.Vector3(), _cp = new THREE.Vector3(), _F = new THREE.Vector3()
+function inspCam(out) { const d = mobile && innerWidth < innerHeight ? 5.2 : 4.0; return out.copy(INS).add(_v2.set(0.75, 0.42, d)) }
+const _v2 = new THREE.Vector3()
 function setMode(m) { mode = m; applyLimits(); if (typeof updateStreaming === 'function' && entries.length) updateStreaming(); document.body.className = 'mode-' + m; $('inspect').classList.toggle('hidden', !(m === 'inspect')); $('empty').classList.toggle('hidden', entries.length > 0 || m !== 'shelf'); syncInspectUI(); dirty = 3 }
 function camShelfGoal() {
   const c = cabinetCenter(), h = NSH * SP + PLINTH, aspect = innerWidth / innerHeight
@@ -451,23 +454,24 @@ async function finishFly() {
 }
 function backToShelf() {
   if (mode !== 'inspect') return
-  if (sheetT || sheetK > 0.01) { sheetT = 0; rot.reset(); syncInspectUI(); return void (pendingBack = true) }
+  if (sheetT || sheetK > 0.01) { pendingBack = true; putSheetBack(); return }
   if (!rot.idle) { rot.reset(); return void (pendingBack = true) }
   if (outT || out > 0.01) { reseat(); return void (pendingBack = true) }
   if (openT || open > 0.01) { openT = 0; pendingBack = true; syncInspectUI(); return }
-  const m = proxies.get(sel.id); holder.visible = false; model.disc.visible = false; m.visible = true
+  pendingBack = false
+  const m = proxies.get(sel.id); holder.visible = false; model.disc.visible = false; m.visible = true // exactly one case: proxy takes over in the same frame
   m.position.copy(INS); m.rotation.set(0, 0, 0); flyFrom = { p: m.position.clone(), q: m.quaternion.clone() }; flyT = 0
   mode = 'back'; document.body.className = 'mode-shelf'; $('inspect').classList.add('hidden'); goCam(camShelfGoal()); pendingBack = false
 }
 let pendingBack = false
-function pressHub() { if (mode !== 'inspect' || open < 0.65 || outT || sheetK > 0) return; rot.reset(); reseating = false; releaseArmed = false; hubT = 1; syncInspectUI() }
+function pressHub() { if (mode !== 'inspect' || open < 0.65 || outT || (sheetK > 0 && !sheetDock)) return; rot.reset(); reseating = false; releaseArmed = false; hubT = 1; syncInspectUI() }
 function reseat() { rot.reset(); discFocus = false; flipT = 0; outT = 0; reseating = true; syncInspectUI(); goCam(camInspectGoal()) }
 function syncInspectUI() {
   if (!sel) return
   $('iTitle').textContent = sel.title || ''; $('iSub').textContent = sel.sample ? t('sample') : `${{ ps5: 'PS5', ns: 'Nintendo Switch', ns2: 'Nintendo Switch 2' }[sel.platform || 'ps5']}${sel.keyCard && sel.platform === 'ns2' ? ' · Game-Key Card' : ''} · ${t('made')}`
-  $('iOpen').textContent = openT ? t('close') : t('open'); $('iOpen').disabled = !!(outT || out > 0.02 || hubT || sheetT || sheetK > 0)
-  $('iSheet').textContent = sheetT ? t('sheetIn') : t('sheetOut'); $('iSheet').disabled = !sheetT && !!(openT || open > 0.01 || outT || out > 0.01 || hubT); $('iReset').textContent = t('resetV')
-  const cart = model.kind === 'cart'; $('iDisc').textContent = (outT || discFocus) ? t(cart ? 'putC' : 'put') : t(cart ? 'takeC' : 'take'); $('iDisc').disabled = (!(open > 0.65) && !outT) || sheetK > 0
+  $('iOpen').textContent = openT ? t('close') : t('open'); $('iOpen').disabled = !!(outT || out > 0.02 || hubT || (sheetT && sheetK < 1 && !sheetDock) || (!sheetT && sheetK > 0))
+  $('iSheet').textContent = sheetT ? t('sheetIn') : t('sheetOut'); $('iSheet').disabled = (!sheetT && (caseBusy() || sheetK > 0)) || (sheetT && sheetK < 1); $('iReset').textContent = t('resetV')
+  const cart = model.kind === 'cart'; $('iDisc').textContent = (outT || discFocus) ? t(cart ? 'putC' : 'put') : t(cart ? 'takeC' : 'take'); $('iDisc').disabled = (!(open > 0.65) && !outT) || (sheetK > 0 && !sheetDock)
   $('iFlip').textContent = t('flip'); $('iFlip').classList.toggle('hidden', !discFocus)
   $('iEdit').disabled = !!sel.sample
 }
@@ -481,12 +485,13 @@ cv.addEventListener('pointerup', (e) => {
   ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ptr, camera)
   if (mode === 'shelf') { const hit = ray.intersectObjects([...proxies.values()])[0]; if (hit) selectEntry(hit.object.userData.id); return }
   if (mode === 'inspect') {
+    if (sheetDock && sheetK >= 1 && !caseBusy() && ray.intersectObject(model.sheetG, true).length) { sheetDock = false; rot.reset(); syncInspectUI(); dirty = 3; return } // tap docked sheet → present it again
     const hits = ray.intersectObjects([model.btnHit, ...model.discPick, model.root], true); if (!hits.length) return
     let o = hits[0].object, isHub = false, isDisc = false
     for (let p = o; p; p = p.parent) { if (p === model.hub || p.name === 'hubBtn') isHub = true; if (p === model.disc) isDisc = true }
     if (discFocus) return
     if ((isHub || isDisc) && open > 0.65) pressHub()
-    else if (!openT && !outT && !sheetT && sheetK <= 0) { rot.reset(); openT = 1; syncInspectUI() }
+    else if (!openT && !outT && (sheetK <= 0 || (sheetDock && sheetK >= 1))) { rot.reset(); openT = 1; syncInspectUI() }
   }
 })
 
@@ -525,30 +530,34 @@ function tick() {
     if (outT === 1 && out > 0.92 && !discFocus) { discFocus = true; syncInspectUI(); goCam(camInspectGoal()) }
     if (pendingBack && out < 0.01 && !outT && open > 0.99 && hubP < 0.01) { openT = 0 }
     sheetK = step(sheetK, sheetT, dt, 2.2); if (sheetK !== tick._sk) { tick._sk = sheetK; busy = true; if (sheetK === 0 || sheetK === 1) syncInspectUI() }
-    if (pendingBack && open < 0.01 && !outT && out < 0.01 && sheetK <= 0 && rot.idle) backToShelf()
+    const wantBack = pendingBack && open < 0.01 && !outT && out < 0.01 && sheetK <= 0 && rot.idle // acted on AFTER this block (see below)
+    if (pendingSheetIn && open < 0.01 && !openT && out < 0.01 && !outT) { pendingSheetIn = false; sheetDock = false; sheetT = 0; syncInspectUI() }
+    const dk0 = dockK; dockK = step(dockK, sheetDock ? 1 : 0, dt, 0.7); if (dk0 !== dockK) busy = true
     if (o0 !== open || h0 !== hubP || u0 !== out || discFocus) busy = true
     if ((o0 > 0.4) !== (open > 0.4) && auto) goCam(camInspectGoal())
     // ---- item transforms (camera fixed): active object gets the user's rotation / zoom / pan
     if (mode === 'inspect') { if (rot.update(dt)) busy = true } else rot.resetNow()
-    const act = discFocus ? 'disc' : sheetK > 0.34 ? 'sheet' : 'case'
+    const act = discFocus ? 'disc' : sheetK > 0.34 && !sheetDock ? 'sheet' : 'case'
     if (act !== rotObj) { rotObj = act; rot.resetNow() }
     rot.quaternion(_rq)
-    caseAway += (THREE.MathUtils.smoothstep(sheetK, 0.4, 0.9) - caseAway) * (1 - Math.exp(-dt * 12))
+    // the case steps aside while the flat sheet (undocked) or the disc is presented
+    const awayT = discFocus ? 1 : sheetDock ? 0 : THREE.MathUtils.smoothstep(sheetK, 0.4, 0.9), a0 = caseAway
+    caseAway += (awayT - caseAway) * (1 - Math.exp(-dt * 6)); if (Math.abs(awayT - caseAway) < 1e-4) caseAway = awayT; if (a0 !== caseAway) busy = true
     const R = model.root, oe = ease(open)
     holder.position.copy(INS).sub(_v.set(0, Hm() / 2, 0)); holder.rotation.set(0, 0, 0)
     R.quaternion.copy(act === 'case' ? _rq : _q.identity())
     R.position.set(0, Hm() / 2 + 0.0005, 0).add(act === 'case' ? rot.offset(INS, _v) : _v.set(0, 0, 0)).sub(_v.set(-0.62 * oe, 0, 0).applyQuaternion(R.quaternion)).add(_v.set(-3.6 * caseAway, 0, 0))
     if (sheetK > 0) { // flat sheet presented square to the camera, scaled to fit the view
-      const cp = camInspectGoal().p, P = _sp.copy(INS); if (act === 'sheet') P.add(rot.offset(INS, _v))
+      const cp = inspCam(_cp), P = _sp.copy(INS).lerp(_dockP.copy(INS).add(DOCK_OFF), ease(dockK)); if (act === 'sheet') P.add(rot.offset(INS, _v))
       const dist = cp.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
-      const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.7 * vh) / model.sheetSize.h)
+      const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.7 * vh) / model.sheetSize.h) * (1 - 0.62 * ease(dockK)) // docked: small, upper-left, out of the way
       _sM.lookAt(cp, P, _up); _q.setFromRotationMatrix(_sM).multiply(_qY180); if (act === 'sheet') _q.premultiply(_rq)
       _sM.compose(P, _q, _v.setScalar(fit)); model.setSheet(sheetK, _sM)
     } else model.setSheet(0)
     holder.updateMatrixWorld(true); model.pose(open, hubP)
     holder.updateMatrixWorld(true); model.seatWorld(_seat)
-    const e = ease(out), F = floatPoint()
-    _lift.copy(_seat).add(new THREE.Vector3(0.05, 0.12, 0.35))
+    const e = ease(out), F = _F.copy(INS).lerp(inspCam(_cp), model.kind === 'cart' ? 0.5 : 0.4)
+    _lift.copy(_seat).add(_v.set(0.05, 0.12, 0.35))
     const isCart = model.kind === 'cart'; model.disc.scale.setScalar(isCart ? 1 + 1.8 * THREE.MathUtils.smoothstep(e, 0.3, 1) : 1)
     if (out < 0.01) { model.disc.position.copy(_seat); R.getWorldQuaternion(model.disc.quaternion); spin = 0 }
     else if (isCart && e < 0.35) { const k = e / 0.35; model.disc.position.lerpVectors(_seat, _lift, ease(k)); model.disc.rotation.set(-k * 0.25, 0, 0) }
@@ -560,8 +569,10 @@ function tick() {
       else model.disc.rotation.set(-0.3 * k, 0.2 * k, 0)
       if (act === 'disc') { model.disc.quaternion.premultiply(_rq); model.disc.position.add(rot.offset(F, _v)) }
     }
-    holder.visible = !(discFocus && out > 0.97)
-    const ui = `${open > 0.65}|${openT}|${outT}|${hubT}|${discFocus}`; if (ui !== tick._ui) { tick._ui = ui; syncInspectUI() }
+    holder.visible = true // the case is moved aside (caseAway) instead of hidden, so a docked sheet stays visible
+    const ui = `${open > 0.65}|${openT}|${outT}|${hubT}|${discFocus}|${sheetDock}|${sheetK > 0}`; if (ui !== tick._ui) { tick._ui = ui; syncInspectUI() }
+    // return-to-shelf is triggered last so nothing later in this frame can re-show the inspect model (was: duplicate case)
+    if (wantBack && mode === 'inspect') backToShelf()
   }
   // camera
   if (auto && camGoal) {
@@ -572,6 +583,7 @@ function tick() {
   controls.enabled = mode === 'shelf'; rot.enabled = mode === 'inspect'
   if (vignette) { const vt = mode === 'inspect' ? 0.52 : 0.32, u = vignette.uniforms.uAmt; if (Math.abs(u.value - vt) > 0.002) { u.value += (vt - u.value) * (1 - Math.exp(-dt * 5)); busy = true } }
   const changed = controls.update()
+  interactionLOD(mode === 'inspect' && (rot.active || busy), dt)
   if (busy || changed || dirty > 0) { const t0 = performance.now(); draw(); perfSample(performance.now() - t0, dt); dirty = Math.max(0, dirty - 1) }
 }
 renderer.setAnimationLoop(tick)
@@ -606,6 +618,20 @@ function setupTier() {
 }
 function sizeComposer() { renderer.setSize(innerWidth, innerHeight, false); if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(innerWidth, innerHeight) } }
 function draw() { if (composer) composer.render(); else renderer.render(scene, camera) }
+// While the user turns an item (and while it settles): skip GTAO, freeze the shadow map, and if frames are still slow
+// drop the composer to 1× resolution. Everything is restored ~0.25 s after the item comes to rest.
+let lodOn = false, lodIdle = 0, lodSlow = 0, lodDpr = false
+function interactionLOD(active, dt) {
+  if (active) {
+    lodIdle = 0
+    if (!lodOn) { lodOn = true; if (gtao) gtao.enabled = false; renderer.shadowMap.autoUpdate = false }
+    if (dt > 0.024) { if (++lodSlow > 20 && !lodDpr && composer && renderer.getPixelRatio() > 1) { lodDpr = true; composer.setPixelRatio(1) } } else lodSlow = Math.max(0, lodSlow - 1)
+  } else if (lodOn && (lodIdle += dt) > 0.25) {
+    lodOn = false; lodSlow = 0; if (gtao) gtao.enabled = true; renderer.shadowMap.autoUpdate = true; renderer.shadowMap.needsUpdate = true
+    if (lodDpr) { lodDpr = false; composer?.setPixelRatio(renderer.getPixelRatio()) }
+    dirty = 3
+  }
+}
 // auto-downgrade: if active frames stay slow, drop one tier (never upgrades back automatically)
 const perf = []
 function perfSample(ms, dt) {
@@ -650,10 +676,13 @@ $('importFile').onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return
   try { const n = await importCollection(f, entries); entries = await db.all(); await syncShelf(); goCam(camShelfGoal()); toast(t('imported').replace('%d', n)) } catch { toast(t('badFile')) }
 }
-$('iOpen').onclick = () => { if (outT || hubT) return; openT = openT ? 0 : 1; syncInspectUI() }
+$('iOpen').onclick = () => { if (outT || hubT) return; if (sheetT) sheetDock = true; rot.reset(); openT = openT ? 0 : 1; syncInspectUI() }
 $('iDisc').onclick = () => { if (outT || discFocus) reseat(); else pressHub() }
 $('iFlip').onclick = () => { flipT = flipT ? 0 : 1 }
-$('iSheet').onclick = () => { if (sheetT) sheetT = 0; else if (!(openT || open > 0.01 || outT || out > 0.01 || hubT)) sheetT = 1; else return; rot.reset(); syncInspectUI(); dirty = 3 }
+function caseBusy() { return !!(openT || open > 0.01 || outT || out > 0.01 || hubT) }
+// put the sheet back: it can only slide into a CLOSED case with the disc seated → close / reseat first, then slide in
+function putSheetBack() { rot.reset(); if (caseBusy()) { pendingSheetIn = true; sheetDock = true; if (outT || discFocus) reseat(); openT = 0 } else { sheetDock = false; sheetT = 0 } syncInspectUI(); dirty = 3 }
+$('iSheet').onclick = () => { if (sheetT) putSheetBack(); else if (!caseBusy()) { sheetT = 1; sheetDock = false; rot.reset(); syncInspectUI(); dirty = 3 } }
 $('iReset').onclick = () => { rot.reset(); dirty = 3 }
 $('iBack').onclick = () => backToShelf()
 $('iDel').onclick = async () => {
@@ -915,7 +944,7 @@ async function boot() {
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.yaw = y; rot.pitch = p || 0; rot.vy = rot.vp = 0; dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  window.__sc = { vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 boot()

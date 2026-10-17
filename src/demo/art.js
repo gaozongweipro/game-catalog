@@ -200,8 +200,8 @@ export function bookletCoverTex() {
 function loadImg(src) { return new Promise((res) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = () => res(null); i.src = src }) }
 /** RE4 Gold Edition (HK/Asia ELAS 10653). Front = official PS Store key art; inner/disc = user's photos; spine/back = clean rebuilds. */
 export async function loadRE4(base) {
-  const names = ['front_art', 'inner_cover', 'inner_tray', 'disc', 'ss1', 'ss2', 'ss3']
+  const names = ['front_art', 'inner_cover_print', 'inner_tray_print', 'disc', 'ss1', 'ss2', 'ss3'] // *_print: insert print only (disc, clips, shell tint removed from photos B/C)
   const ims = await Promise.all(names.map((n) => loadImg(`${base}demo/re4_${n}.jpg`)))
   img = ims[0] || new Image(); names.slice(1).forEach((n, i) => (RE[n] = ims[i + 1]))
-  return { front: frontTex(), spine: spineTex(), back: backTex(), innerCover: RE.inner_cover, innerTray: RE.inner_tray, disc: RE.disc, booklet: bookletCoverTex() }
+  return { front: frontTex(), spine: spineTex(), back: backTex(), innerCover: RE.inner_cover_print, innerTray: RE.inner_tray_print, disc: RE.disc, booklet: bookletCoverTex() }
 }

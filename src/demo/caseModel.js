@@ -365,8 +365,11 @@ function ribbon(o, h, mat, xb, xf) {
   m.userData = { pts, h, total }
   return m
 }
-const wrapIns = ribbon(0.0018, INS_H, wrapPaper)
-const wrapInner = ribbon(0.0011, INS_H, wrapInnerPaper)
+// The cover sheet is its own object: a group holding ONLY the two print faces. Nothing else is parented to it,
+// and it is never a parent of shell/hinge/hub/clips/disc/booklet/film (those stay in the case hierarchy).
+const sheetG = new THREE.Group(); sheetG.name = 'coverSheet'; root.add(sheetG)
+const wrapIns = ribbon(0.0018, INS_H, wrapPaper); sheetG.add(wrapIns)
+const wrapInner = ribbon(0.0011, INS_H, wrapInnerPaper); sheetG.add(wrapInner)
 const sleeve = ribbon(0.0034, INS_H + 0.028, filmMat); sleeve.renderOrder = 2
 // Living-hinge plastic skins (outer face + thinned inner face of the flex band) — bend as smooth arcs
 const HX = [-W / 2 + 0.012, -W / 2], HXF = [-W / 2 + 0.012]
@@ -405,7 +408,7 @@ function updateSheet(m) {
   const { pts, h, total } = m.userData, pos = m.geometry.attributes.position, k = sheet.k
   const kS = smooth(0, 0.38, k), kU = smooth(0.34, 1, k), a = kU * Math.PI
   root.updateWorldMatrix(true, false)
-  if (kU <= 0 || !sheet.have) { sheet.caseM.copy(root.matrixWorld); sheet.have = kU > 0 }
+  sheet.caseM.copy(root.matrixWorld) // live case frame: the sheet always slides back into wherever the case is now
   _sq.setFromAxisAngle(_Y, -a / 2); _sm[1].compose(spineG.position, _sq, _one); _sm[2].copy(_sm[1]).multiply(_tA.compose(coverHinge.position, _sq, _one))
   // rigid travel: case frame (slid up, about the sheet centre) → presentation frame
   _tA.copy(sheet.caseM).multiply(_tB.makeTranslation(SHEET_CENTRE.x * kU, kS * (INS_H + 0.06), SHEET_CENTRE.z * kU)); _tA.decompose(_p0, _q0, _s0)
@@ -499,13 +502,15 @@ const diffMat = new THREE.ShaderMaterial({
       float fade = smoothstep(0.235,0.25,rad)*(1.-smoothstep(0.57,0.583,rad));
       gl_FragColor = vec4(col*uStr*fade, 1.); }`,
 })
-const _lp = new THREE.Vector3()
+const _lp = new THREE.Vector3(), _lt = new THREE.Vector3(), _lc = { n: 0, list: null }
 const diffRing = discRing(0.235, R - 0.016, diffMat, -0.0006, true)
 diffRing.onBeforeRender = (r, scn) => { // collect up to 4 visible lights (world positions)
   let n = 0
-  scn.traverseVisible((o) => { if (n >= 4 || !o.isLight || o.isAmbientLight || o.isHemisphereLight) return
-    o.getWorldPosition(_lp); if (o.isDirectionalLight) _lp.sub(o.target.getWorldPosition(new THREE.Vector3())).normalize().multiplyScalar(50).add(disc.getWorldPosition(new THREE.Vector3()))
-    diffMat.uniforms.uL.value[n].copy(_lp); diffMat.uniforms.uI.value[n] = Math.min(1.5, o.intensity * (o.isRectAreaLight ? 0.35 : 0.6)); n++ })
+  // light list is cached (a full scene traversal per frame is expensive with hundreds of shelf proxies)
+  if (!(_lc.n++ % 60) || !_lc.list) { _lc.list = []; scn.traverse((o) => { if (o.isLight && !o.isAmbientLight && !o.isHemisphereLight) _lc.list.push(o) }) }
+  for (const o of _lc.list) { if (n >= 4) break; let vis = o.visible; for (let p = o.parent; vis && p; p = p.parent) vis = p.visible; if (!vis) continue
+    o.getWorldPosition(_lp); if (o.isDirectionalLight) _lp.sub(o.target.getWorldPosition(_lt)).normalize().multiplyScalar(50).add(disc.getWorldPosition(_lt))
+    diffMat.uniforms.uL.value[n].copy(_lp); diffMat.uniforms.uI.value[n] = Math.min(1.5, o.intensity * (o.isRectAreaLight ? 0.35 : 0.6)); n++ }
   // plus a virtual "room" light above-behind the viewer so the rainbow is present under env lighting alone
   if (n < 4) { _lp.copy(r.xr?.isPresenting ? _lp : _lp.set(0, 6, 3)); diffMat.uniforms.uL.value[n].copy(_lp); diffMat.uniforms.uI.value[n] = 0.5; n++ }
   diffMat.uniforms.uN.value = n
@@ -594,5 +599,5 @@ disc.position.copy(seatWorld(_seat))
     W, H, D, HALF, TRAY_Z, DISC_X, DISC_Y, platform, kind: SPEC.kind, INS_W, INS_H,
     /** k 0..1 (see updateSheet); pres = world matrix of the flat sheet (its print faces local −z) */
     setSheet(k, pres) { sheet.k = k; if (pres) sheet.pres.copy(pres); if (k <= 0) sheet.have = false; updateWrap() },
-    sheetSize: { w: wrapIns.userData.total, h: INS_H }, sheetMeshes: [wrapIns, wrapInner] }
+    sheetSize: { w: wrapIns.userData.total, h: INS_H }, sheetMeshes: [wrapIns, wrapInner], sheetG }
 }
