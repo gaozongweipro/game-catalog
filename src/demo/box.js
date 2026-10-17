@@ -322,7 +322,7 @@ function tick() {
   root.position.copy(_ctr).sub(_tmp.set(-0.62 * oe, 0, 0).applyQuaternion(root.quaternion)).add(_tmp.set(-caseAway * 7, 0, 0))
   if (act === 'case') root.position.add(rot.offset(_ctr, _tmp))
   if (sheetK > 0) {
-    const P = _sp.copy(TARGET).add(_tmp.set(0, 0.1, 0)).lerp(_dock.set(-1.25, 1.55, -0.9), easeIO(dockK)); if (act === 'sheet') P.add(rot.offset(P, _tmp))
+    const P = _sp.copy(TARGET).add(_tmp.set(0, 0.1, 0)).lerp(_dock.set(-1.15, 1.3, -0.5), easeIO(dockK)); if (act === 'sheet') P.add(rot.offset(P, _tmp))
     const dist = camera.position.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
     const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.66 * vh) / model.sheetSize.h) * (1 - 0.6 * easeIO(dockK))
     _sM.lookAt(camera.position, P, _up); _sq.setFromRotationMatrix(_sM).multiply(_qY180); if (act === 'sheet') _sq.premultiply(_rq)
