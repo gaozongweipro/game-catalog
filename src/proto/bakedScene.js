@@ -38,7 +38,7 @@ export async function loadBaked(renderer, scene, { wrap, art }) {
   const iw = document.createElement('canvas'); iw.width = wrap.width; iw.height = wrap.height; { const g = iw.getContext('2d'), b = Math.round((1.29 + 0.135) * 800); g.fillStyle = '#efece6'; g.fillRect(0, 0, iw.width, iw.height)
     if (art.innerCover) { g.save(); g.translate(iw.width, 0); g.scale(-1, 1); g.drawImage(art.innerCover, 0, 0, iw.width - b, iw.height); g.restore() } }
   const innerMat = new THREE.MeshStandardMaterial({ map: tex(iw), roughness: 0.7, side: THREE.BackSide }), twins = []
-  cs.scene.traverse((o) => { if (o.isMesh && o.material.name === 'CoverPrint') { o.material.side = THREE.FrontSide; const t = new THREE.Mesh(o.geometry, innerMat); t.castShadow = t.receiveShadow = true; twins.push([o, t]) } })
+  cs.scene.traverse((o) => { if (o.isMesh && o.material.name === 'CoverPrint') { o.material.side = THREE.FrontSide; const t = new THREE.Mesh(o.geometry.clone(), innerMat); t.castShadow = t.receiveShadow = true; twins.push([o, t]) } })
   for (const [o, t] of twins) { t.position.copy(o.position); t.quaternion.copy(o.quaternion); t.scale.copy(o.scale); o.parent.add(t) }
   scene.add(cs.scene)
   root.position.set(0, GZ + 0.85 + 0.0005, 0.12); root.rotation.y = -0.38
