@@ -1,6 +1,7 @@
 import './box.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { ItemRotator } from './itemRotate.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 const BASE = import.meta.env.BASE_URL
@@ -38,6 +39,9 @@ controls.addEventListener('start', () => { userMoved = true })
 controls.minDistance = 0.5
 controls.maxDistance = 7
 controls.target.copy(TARGET)
+// The camera stays fixed (room/background never moves): drag turns the item, wheel/pinch brings it closer, right/two-finger drag nudges it.
+controls.enabled = qs.has('orbit')
+const rot = new ItemRotator(canvas, camera); rot.enabled = !qs.has('orbit')
 
 const key = new THREE.DirectionalLight(0xfff1e0, 2.05)
 key.position.set(2.5, 4.5, 3)
@@ -99,7 +103,7 @@ const H = model.H
 const { root, base, cover, coverPlate, spineG, coverHinge, hub, btn, btnHit, teeth, disc, discPick, shadowDisc, booklet, sleeve,
   shellMat, trayMat, filmMat, wrapPaper, bookletMat, bkPaper, labelMat, dataMat, updateWrap, seatWorld } = model
 const _seat = new THREE.Vector3()
-const FLOAT = new THREE.Vector3(0, 1.1, 0)
+const FLOAT = TARGET.clone().lerp(HOME, 0.22).add(new THREE.Vector3(0, 0.22, 0))
 if (PLAT === 'ps5') loadRE4(BASE).then((a) => model.setArt(a))
 else { // Switch demo: generated print set from a sample cover (Game-Key Card on NS2 with ?key)
   const im = new Image(); im.onload = () => model.setArt(buildArt({ title: 'Resident Evil 4', platform: PLAT, keyCard: qs.has('key'), band: true, slots: {} }, { front: im })); im.src = BASE + 'demo/re4_front_art.jpg'
@@ -118,7 +122,7 @@ let resetT = 0
 const caseMats = [shellMat, trayMat, filmMat, wrapPaper, bookletMat, bkPaper]
 
 function q(id) { return document.getElementById(id) }
-const ui = { bFlip: q('bFlip'), bOpen: q('bOpen'), bDisc: q('bDisc'), bBrowse: q('bBrowse'), bReset: q('bReset'), lang: q('lang') }
+const ui = { bSheet: q('bSheet'), bFlip: q('bFlip'), bOpen: q('bOpen'), bDisc: q('bDisc'), bBrowse: q('bBrowse'), bReset: q('bReset'), lang: q('lang') }
 let lang = localStorage.getItem('game-catalog-lang') === 'en' ? 'en' : 'zh'
 const T_ = {
   zh: {
@@ -126,8 +130,8 @@ const T_ = {
     open: '打开盒子', close: '合上盒子',
     take: '按压卡扣取盘', put: '放回盒子',
     browse: '查看光盘', exitBrowse: '退出查看',
-    reset: '复位视角',
-    hint: '拖动旋转 · 双指缩放/平移 · 点封面开盒 · 按压中心卡扣取盘',
+    reset: '复位', sheetOut: '抽出封面', sheetIn: '放回封面',
+    hint: '拖动旋转盒子 · 滚轮/双指缩放 · 右键/双指平移 · 点封面开盒 · 按压中心卡扣取盘',
     hintBrowse: '拖动旋转查看 · 点「翻面」看数据面 · 点「放回盒子」归位',
     back: '← 返回目录', lang: 'EN',
   },
@@ -136,8 +140,8 @@ const T_ = {
     open: 'Open case', close: 'Close case',
     take: 'Press hub to release', put: 'Reseat disc',
     browse: 'Inspect disc', exitBrowse: 'Exit inspect',
-    reset: 'Reset view',
-    hint: 'Drag to orbit · pinch zoom / two-finger pan (right- or shift-drag on desktop) · tap cover to open · press hub to release',
+    reset: 'Reset', sheetOut: 'Pull out cover', sheetIn: 'Put cover back',
+    hint: 'Drag to turn the case · wheel/pinch to zoom · right- or two-finger drag to move · tap cover to open · press hub to release',
     hintBrowse: 'Orbit to inspect · Flip to see the data side · Reseat to return',
     back: '← Back to catalog', lang: '中文',
   },
@@ -157,9 +161,10 @@ function syncUI() {
   ui.lang.textContent = t.lang; applyEnv()
   ui.bReset.textContent = t.reset
   ui.bOpen.textContent = openTarget ? t.close : t.open
-  ui.bOpen.disabled = !!(outTarget || out > 0.02 || discFocus || hubPressTarget)
+  ui.bOpen.disabled = !!(outTarget || out > 0.02 || discFocus || hubPressTarget || sheetT || sheetK > 0)
+  ui.bSheet.textContent = sheetT ? t.sheetIn : t.sheetOut; ui.bSheet.disabled = !sheetT && !canSheet()
   ui.bDisc.textContent = (outTarget || discFocus) ? t.put : t.take
-  ui.bDisc.disabled = !(openTarget && open > 0.65) && !discFocus && !(out > 0.5)
+  ui.bDisc.disabled = (!(openTarget && open > 0.65) && !discFocus && !(out > 0.5)) || sheetK > 0
   // Browse toggles disc-focus when disc is already out
   ui.bBrowse.classList.toggle('hidden', !(out > 0.85 || discFocus))
   ui.bBrowse.disabled = out < 0.85 && !discFocus
@@ -167,10 +172,12 @@ function syncUI() {
   ui.bFlip.textContent = t.flip; ui.bFlip.classList.toggle('hidden', !discFocus)
   document.body.classList.toggle('disc-focus', discFocus)
 }
-function canOpen() { return !(outTarget || out > 0.02 || discFocus || hubPressTarget) }
+function canOpen() { return !(outTarget || out > 0.02 || discFocus || hubPressTarget || sheetT || sheetK > 0) }
+let sheetK = 0, sheetT = 0, rotObj = 'case'
+function canSheet() { return !(openTarget || open > 0.01 || outTarget || out > 0.01 || hubPressTarget || discFocus) }
 function toggleOpen() {
   if (!canOpen()) return
-  openTarget = openTarget ? 0 : 1
+  openTarget = openTarget ? 0 : 1; rot.reset()
   syncUI()
 }
 function pressHubRelease() {
@@ -178,7 +185,7 @@ function pressHubRelease() {
   if (outTarget || out > 0.5) { reseatDisc(); return }
   if (!openTarget || open < 0.65) return
   // Primary action: depress hub → retract teeth → lift disc → enter focus
-  reseating = false
+  reseating = false; rot.reset()
   releaseArmed = false
   hubPressTarget = 1
   syncUI()
@@ -196,7 +203,7 @@ function exitDiscFocus() {
   syncUI()
 }
 function reseatDisc() {
-  discFocus = false; userMoved = false; flipT = 0
+  discFocus = false; userMoved = false; flipT = 0; rot.reset()
   focusDismissed = false
   outTarget = 0
   reseating = true
@@ -207,7 +214,8 @@ ui.bDisc.onclick = pressHubRelease
 ui.bBrowse.onclick = () => { if (discFocus) exitDiscFocus(); else enterDiscFocus() }
 ui.lang.onclick = () => { lang = lang === 'en' ? 'zh' : 'en'; try { localStorage.setItem('game-catalog-lang', lang) } catch {}; syncUI() }
 q('bEnv').onclick = () => { envName = ENV_KEYS[(ENV_KEYS.indexOf(envName) + 1) % ENV_KEYS.length]; applyEnv() }
-ui.bReset.onclick = () => { resetT = 1; userMoved = false }
+ui.bReset.onclick = () => { rot.reset(); if (controls.enabled) { resetT = 1; userMoved = false } }
+ui.bSheet.onclick = () => { if (sheetT) sheetT = 0; else if (canSheet()) sheetT = 1; else return; rot.reset(); syncUI() }
 let flip = 0, flipT = 0
 ui.bFlip.onclick = () => { flipT = flipT ? 0 : 1 }
 q('back').href = BASE; q('toShowcase').href = BASE + 'showcase.html'; q('toShowcase').textContent = lang === 'en' ? '3D Showcase' : '3D 陈列柜'
@@ -246,6 +254,7 @@ canvas.addEventListener('pointerup', (e) => {
     // Secondary only: tapping disc face also triggers hub press (not primary path)
     pressHubRelease(); return
   }
+  if (sheetT || sheetK > 0) return
   if (isCover(o) && canOpen()) { toggleOpen(); return }
   if (!openTarget && canOpen()) toggleOpen()
 })
@@ -263,7 +272,7 @@ const step = (v, t, dt, dur) => (t > v ? Math.min(t, v + dt / dur) : Math.max(t,
 const HINGE_MAX = THREE.MathUtils.degToRad(178) // book open — almost flat
 const clock = new THREE.Clock()
 const _lift = new THREE.Vector3()
-const _tmp = new THREE.Vector3()
+const _tmp = new THREE.Vector3(), _ctr = new THREE.Vector3(), _sp = new THREE.Vector3(), _rq = new THREE.Quaternion(), _qI = new THREE.Quaternion(), _sq = new THREE.Quaternion(), _sM = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _qY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
 let releaseArmed = false
 let reseating = false
 let lastUiKey = ''
@@ -296,6 +305,25 @@ function tick() {
   const oe = easeIO(open)
   spineG.rotation.y = -oe * HINGE_MAX / 2
   coverHinge.rotation.y = -oe * HINGE_MAX / 2
+  // ---- item rotation (camera fixed) + cover-sheet pull-out
+  sheetK = step(sheetK, sheetT, dt, 2.2)
+  rot.update(dt)
+  const act = discFocus ? 'disc' : sheetK > 0.34 ? 'sheet' : 'case'
+  if (act !== rotObj) { rotObj = act; rot.resetNow() }
+  rot.quaternion(_rq)
+  caseAway += (Math.max(discFocus ? 1 : 0, THREE.MathUtils.smoothstep(sheetK, 0.4, 0.9)) - caseAway) * (1 - Math.exp(-dt * 4))
+  root.quaternion.copy(act === 'case' ? _rq : _qI)
+  _ctr.set(0, H / 2 + 0.0005, 0) // open book stays centred: pivot = centre of the opened spread
+  root.position.copy(_ctr).sub(_tmp.set(-0.62 * oe, 0, 0).applyQuaternion(root.quaternion)).add(_tmp.set(-caseAway * 7, 0, 0))
+  if (act === 'case') root.position.add(rot.offset(_ctr, _tmp))
+  if (sheetK > 0) {
+    const P = _sp.copy(TARGET).add(_tmp.set(0, 0.1, 0)); if (act === 'sheet') P.add(rot.offset(P, _tmp))
+    const dist = camera.position.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
+    const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.66 * vh) / model.sheetSize.h)
+    _sM.lookAt(camera.position, P, _up); _sq.setFromRotationMatrix(_sM).multiply(_qY180); if (act === 'sheet') _sq.premultiply(_rq)
+    _sM.compose(P, _sq, _tmp.setScalar(fit)); model.setSheet(sheetK, _sM)
+  } else model.setSheet(0)
+  root.updateMatrixWorld(true)
   updateWrap()
 
   // Hub teeth retract radially + button sinks when pressed
@@ -326,17 +354,18 @@ function tick() {
     if (discFocus) {
       // gentle idle tumble so both label and data side can be inspected while orbiting
       // subtle turntable idle spin about the disc's own axis + smooth flip between label and data side
-      if (!qs.has('shot')) discSpin += dt * 0.35
+      if (!qs.has('shot') && !rot.dragging) discSpin += dt * 0.35
       flip = step(flip, flipT, dt, 0.7)
       disc.rotation.set(-0.42, easeIO(flip) * Math.PI, 0)
       disc.rotateZ(discSpin)
+      disc.quaternion.premultiply(_rq); disc.position.add(rot.offset(FLOAT, _tmp))
     } else {
       disc.rotation.set(-0.35 - k * 0.2, 0.55 + k * 0.4, 0.15)
     }
   }
   if (out < 0.01) {
     disc.position.copy(_seat)
-    disc.rotation.set(0, 0, 0)
+    root.getWorldQuaternion(disc.quaternion)
     discSpin = 0
     if (hubPressTarget === 0 && hubPress > 0 && outTarget === 0) {
       // teeth already expanding via hubPress step
@@ -357,12 +386,11 @@ function tick() {
   // case slides away + hides so the disc is inspected standalone
   const away = THREE.MathUtils.clamp((e - 0.35) / 0.65, 0, 1) * (discFocus || outTarget ? 1 : 0)
   caseAway += ((discFocus ? 1 : 0) - caseAway) * (1 - Math.exp(-dt * 4))
-  root.position.x = -caseAway * 3.2
-  root.visible = caseAway < 0.97
+  root.visible = !(discFocus && caseAway > 0.97)
   if (model.kind === 'cart') disc.scale.setScalar(1 + 1.8 * caseAway)
   blob.visible = root.visible
   discLights.forEach((l) => (l.visible = discFocus))
-  root.position.y = H / 2 + 0.0005
+  blob.position.x = root.position.x
 
   // Camera targets
   const camGoal = discFocus ? DISC_HOME : HOME
@@ -370,7 +398,7 @@ function tick() {
   if (resetT || discFocus || (!discFocus && resetT === 0 && qs.has('shot'))) {
     // when entering/leaving focus, ease camera
   }
-  if (resetT) {
+  if (!controls.enabled) { /* fixed camera */ } else if (resetT) {
     const k = 1 - Math.exp(-dt * 6)
     const cg = discFocus ? DISC_HOME : HOME, tg = discFocus ? DISC_TARGET : TARGET
     camera.position.lerp(cg, k); controls.target.lerp(tg, k)
@@ -396,7 +424,7 @@ function tick() {
     }
   }
 
-  const uiKey = `${open > 0.65}|${openTarget}|${out > 0.02}|${out > 0.5}|${out > 0.85}|${outTarget}|${hubPressTarget}|${discFocus}`
+  const uiKey = `${sheetK > 0}|${sheetT}|${open > 0.65}|${openTarget}|${out > 0.02}|${out > 0.5}|${out > 0.85}|${outTarget}|${hubPressTarget}|${discFocus}`
   if (uiKey !== lastUiKey) { lastUiKey = uiKey; syncUI() }
 
   controls.update()
@@ -406,7 +434,8 @@ renderer.setAnimationLoop(tick)
 document.addEventListener('visibilitychange', () => renderer.setAnimationLoop(document.hidden ? null : tick))
 addEventListener('pagehide', () => { renderer.setAnimationLoop(null); envRT.dispose(); renderer.dispose() })
 syncUI()
-window.__box = () => ({ open: +open.toFixed(2), hubPress: +hubPress.toFixed(2), out: +out.toFixed(2), discFocus })
+window.__box = () => ({ open: +open.toFixed(2), hubPress: +hubPress.toFixed(2), out: +out.toFixed(2), discFocus, sheet: +sheetK.toFixed(2), yaw: +rot.yaw.toFixed(2), obj: rotObj, cam: camera.position.toArray().map((v) => +v.toFixed(4)) })
+window.__boxRot = (y, p) => { rot.yaw = y; rot.pitch = p || 0; rot.vy = rot.vp = 0 }
 window.__hubScreen = () => { const v = new THREE.Vector3(); btn.getWorldPosition(v); v.project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] }
 
 // Query helpers for screenshots / deep links

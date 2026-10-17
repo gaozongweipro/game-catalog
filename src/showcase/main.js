@@ -17,6 +17,8 @@ import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
+import { ItemRotator } from '../demo/itemRotate.js'
 
 const BASE = import.meta.env.BASE_URL
 const qs = new URLSearchParams(location.search)
@@ -28,13 +30,13 @@ let lang = localStorage.getItem('game-catalog-lang') === 'en' ? 'en' : 'zh'
 const S = {
   zh: { brandT: '陈列柜', brandS: '我的电子实体版', vSpine: '书脊', vFront: '正面', makeT: '制作', loadT: '正在布置展柜…', emptyH: '展柜还是空的', emptyP: '上传封面，制作你的第一张电子实体版', emptyBtn: '开始制作',
     mExport: '导出收藏', mImport: '导入收藏', iBackT: '放回展柜', open: '打开', close: '合上', take: '取盘', put: '放回光盘', flip: '翻面', iEdit: '编辑', iLeft: '前移', iRight: '后移', iDel: '删除',
-    eNew: '制作电子实体版', eEdit: '编辑电子实体版', eCancel: '取消', eSave: '保存', lTitle: '游戏名称', lBand: '平台标识', lKey: 'Game-Key Card（钥匙卡）', platNote: '', pn_ps5: 'PS5 蓝色 Blu-ray 盒 · 135×171×13.5 mm', pn_ns: 'Switch 透明盒 + 深灰卡带 · 105×170×11 mm', pn_ns2: 'Switch 2 半透红盒 + 红色卡带 · 105×170×11 mm', takeC: '取卡带', lkSearching: '正在搜索…', lkNone: '没有找到匹配，可上传封面，或直接保存（会根据名称生成封面）', lkWeb: '联网结果', lkCat: '目录', lkPick: '选一个自动填充封面与信息', lkFilled: '已自动填充：%s', lkFail: '封面下载失败，已保留其他信息', untitled: '未命名', putC: '放回卡带', guideFrame: '红色边框', slotNote: '全部可选：输入游戏名会自动联网查找封面并补全，未填的部分自动生成；点卡片可上传或裁切。',
+    eNew: '制作电子实体版', eEdit: '编辑电子实体版', eCancel: '取消', eSave: '保存', lTitle: '游戏名称', lBand: '平台标识', lKey: 'Game-Key Card（钥匙卡）', platNote: '', pn_ps5: 'PS5 蓝色 Blu-ray 盒 · 135×171×13.5 mm', pn_ns: 'Switch 透明盒 + 深灰卡带 · 105×170×11 mm', pn_ns2: 'Switch 2 半透红盒 + 红色卡带 · 105×170×11 mm', takeC: '取卡带', sheetOut: '抽出封面', sheetIn: '放回封面', resetV: '复位', lkSearching: '正在搜索…', lkNone: '没有找到匹配，可上传封面，或直接保存（会根据名称生成封面）', lkWeb: '联网结果', lkCat: '目录', lkPick: '选一个自动填充封面与信息', lkFilled: '已自动填充：%s', lkFail: '封面下载失败，已保留其他信息', untitled: '未命名', putC: '放回卡带', guideFrame: '红色边框', slotNote: '全部可选：输入游戏名会自动联网查找封面并补全，未填的部分自动生成；点卡片可上传或裁切。',
     cHint: '拖动移动 · 双指或滚轮缩放', cReset: '重置', cReplace: '换图', cRemove: '移除', cDone: '完成', auto: '自动生成', uploaded: '已上传', required: '必填', back: '←',
     sample: '示例 · 我的实体收藏', made: '电子实体版', needTitle: '请填写游戏名称', needFront: '请上传正面封面', saved: '已保存到展柜', deleted: '已删除', delQ: '确定删除「%s」吗？', exported: '已导出', imported: '已导入 %d 项', badFile: '文件无法识别',
     sampleRO: '示例条目不能编辑', processing: '处理中…', guideBand: 'PS5 顶条区域', guideBleed: '出血线', hub: '中心孔', title: '3D 陈列柜 · 我的电子实体版' },
   en: { brandT: 'Showcase', brandS: 'My digital physical editions', vSpine: 'Spines', vFront: 'Fronts', makeT: 'Create', loadT: 'Setting up the cabinet…', emptyH: 'The cabinet is empty', emptyP: 'Upload a cover to make your first digital physical edition', emptyBtn: 'Get started',
     mExport: 'Export collection', mImport: 'Import collection', iBackT: 'Back to shelf', open: 'Open', close: 'Close', take: 'Take disc', put: 'Put disc back', flip: 'Flip', iEdit: 'Edit', iLeft: 'Move left', iRight: 'Move right', iDel: 'Delete',
-    eNew: 'New digital edition', eEdit: 'Edit digital edition', eCancel: 'Cancel', eSave: 'Save', lTitle: 'Game title', lBand: 'Platform logo', lKey: 'Game-Key Card', platNote: '', pn_ps5: 'PS5 blue Blu-ray case · 135×171×13.5 mm', pn_ns: 'Switch clear case + dark-grey card · 105×170×11 mm', pn_ns2: 'Switch 2 translucent red case + red card · 105×170×11 mm', takeC: 'Take card', lkSearching: 'Searching…', lkNone: 'No match. Upload a cover or just save (a cover will be generated from the name)', lkWeb: 'Web', lkCat: 'Catalog', lkPick: 'Pick one to auto-fill cover and details', lkFilled: 'Auto-filled: %s', lkFail: 'Cover download failed; other details kept', untitled: 'Untitled', putC: 'Put card back', guideFrame: 'Red frame', slotNote: 'Everything is optional: type a game name to look up the cover online; anything left blank is generated. Tap a card to upload or crop.',
+    eNew: 'New digital edition', eEdit: 'Edit digital edition', eCancel: 'Cancel', eSave: 'Save', lTitle: 'Game title', lBand: 'Platform logo', lKey: 'Game-Key Card', platNote: '', pn_ps5: 'PS5 blue Blu-ray case · 135×171×13.5 mm', pn_ns: 'Switch clear case + dark-grey card · 105×170×11 mm', pn_ns2: 'Switch 2 translucent red case + red card · 105×170×11 mm', takeC: 'Take card', sheetOut: 'Pull out cover', sheetIn: 'Put cover back', resetV: 'Reset', lkSearching: 'Searching…', lkNone: 'No match. Upload a cover or just save (a cover will be generated from the name)', lkWeb: 'Web', lkCat: 'Catalog', lkPick: 'Pick one to auto-fill cover and details', lkFilled: 'Auto-filled: %s', lkFail: 'Cover download failed; other details kept', untitled: 'Untitled', putC: 'Put card back', guideFrame: 'Red frame', slotNote: 'Everything is optional: type a game name to look up the cover online; anything left blank is generated. Tap a card to upload or crop.',
     cHint: 'Drag to move · pinch or scroll to zoom', cReset: 'Reset', cReplace: 'Replace', cRemove: 'Remove', cDone: 'Done', auto: 'Auto', uploaded: 'Uploaded', required: 'Required', back: '←',
     sample: 'Sample · my physical copy', made: 'Digital physical edition', needTitle: 'Please enter a title', needFront: 'Please upload a front cover', saved: 'Saved to the cabinet', deleted: 'Deleted', delQ: 'Delete “%s”?', exported: 'Exported', imported: 'Imported %d item(s)', badFile: 'Unrecognised file',
     sampleRO: 'The sample entry is read-only', processing: 'Processing…', guideBand: 'PS5 band', guideBleed: 'Bleed', hub: 'Hub', title: '3D Showcase · digital physical editions' },
@@ -55,7 +57,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.5 : 2))
 renderer.outputColorSpace = THREE.SRGBColorSpace
 // Khronos PBR Neutral keeps print colours (covers) hue-accurate while still rolling off highlights
 renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap // r186: PCF honours shadow.radius (PCFSoft was removed)
 RectAreaLightUniformsLib.init()
 const scene = new THREE.Scene()
 const pmrem = new THREE.PMREMGenerator(renderer)
@@ -63,6 +65,8 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; scene.
 scene.background = new THREE.Color(0x1b1916)
 const camera = new THREE.PerspectiveCamera(mobile ? 46 : 36, 1, 0.05, 80)
 const controls = new OrbitControls(camera, cv)
+// inspect: camera + room stay fixed, the item itself is turned / zoomed / nudged
+const rot = new ItemRotator(cv, camera, { onInput: () => { dirty = 3 } })
 controls.enableDamping = true; controls.dampingFactor = 0.08; controls.screenSpacePanning = true
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }
 let auto = true
@@ -140,8 +144,8 @@ function grainCanvas(w, h, seed = 1) { // procedural oak: base colour + height (
 }
 const WOOD = grainCanvas(1024, 256, 3)
 function woodMat(rot = 0, rep = [1, 1]) {
-  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.62, clearcoat: 0.35, clearcoatRoughness: 0.4, normalScale: new THREE.Vector2(0.6, 0.6), sheen: 0.15 })
-  for (const k of ['map', 'normalMap', 'roughnessMap']) { const t = WOOD[k].clone(); t.rotation = rot; t.repeat.set(...rep); t.needsUpdate = true; m[k] = t }
+  const m = new THREE.MeshPhysicalMaterial({ roughness: 0.66, clearcoat: 0.3, clearcoatRoughness: 0.45, normalScale: new THREE.Vector2(0.45, 0.45), sheen: 0.15 })
+  for (const k of ['map', 'normalMap', 'roughnessMap']) { const t = WOOD[k].clone(); t.anisotropy = renderer.capabilities.getMaxAnisotropy(); t.rotation = rot; t.repeat.set(...rep); t.needsUpdate = true; m[k] = t }
   return m
 }
 const frameMat = woodMat(0, [1.5, 1]), frameMatV = woodMat(Math.PI / 2, [1.5, 1]), shelfWood = woodMat(0, [2, 0.5])
@@ -171,11 +175,15 @@ function linenTex() {
 const backMat = new THREE.MeshStandardMaterial({ map: linenTex(), color: 0xb3aa9d, roughness: 0.92 })
 // 10 mm float glass: faint green body, strong clearcoat reflections of the room env, green edges
 const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xeaf6f0, roughness: 0.03, metalness: 0, transparent: true, opacity: 0.22, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, envMapIntensity: 1.4, depthWrite: false })
-const glassEdge = new THREE.MeshPhysicalMaterial({ color: 0x6fb89a, roughness: 0.08, transparent: true, opacity: 0.85, clearcoat: 1, envMapIntensity: 1.2 })
+const glassEdge = new THREE.MeshPhysicalMaterial({ color: 0x6fb89a, roughness: 0.16, transparent: true, opacity: 0.85, clearcoat: 1, envMapIntensity: 1.2 })
 const doorGlass = new THREE.MeshPhysicalMaterial({ color: 0xf4fbf8, roughness: 0.02, transparent: true, opacity: 0.06, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, envMapIntensity: 1.6, depthWrite: false, side: THREE.DoubleSide })
-const brass = new THREE.MeshPhysicalMaterial({ color: 0xc9a46a, metalness: 1, roughness: 0.28, clearcoat: 0.3 })
-const alu = new THREE.MeshPhysicalMaterial({ color: 0xb8bcc0, metalness: 1, roughness: 0.35 })
-const ledMat = new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(5.2, 4.3, 3.2) }) // HDR → picked up by bloom
+const brass = new THREE.MeshPhysicalMaterial({ color: 0xc9a46a, metalness: 1, roughness: 0.36, clearcoat: 0.2, clearcoatRoughness: 0.2 })
+const alu = new THREE.MeshPhysicalMaterial({ color: 0xb8bcc0, metalness: 1, roughness: 0.45 })
+// LED strip: opal diffuser with a soft cross-profile (bright core → dim edge) so the thin strip doesn't shimmer
+// under MSAA/bloom; moderate HDR so bloom stays a steady halo instead of flickering on sub-pixel highlights.
+const ledMat = (() => { const c = canvas(4, 64), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 64)
+  gr.addColorStop(0, '#5a5048'); gr.addColorStop(0.3, '#e9dccb'); gr.addColorStop(0.5, '#ffffff'); gr.addColorStop(0.7, '#e9dccb'); gr.addColorStop(1, '#5a5048'); g.fillStyle = gr; g.fillRect(0, 0, 4, 64)
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color().setRGB(3.4, 2.9, 2.3) }) })()
 const doors = []
 let shelfY = []
 const RB = {}
@@ -212,7 +220,7 @@ function buildOne(ci) {
     // LED housing: aluminium channel with diffuser under the shelf above
     const top = y + SP
     box(CW - 0.3, 0.035, 0.06, alu, G, 0, top - 0.035, CD / 2 - 0.13, false, 0.006)
-    box(CW - 0.34, 0.01, 0.04, ledMat, G, 0, top - 0.055, CD / 2 - 0.13, false)
+    box(CW - 0.34, 0.022, 0.045, alu, G, 0, top - 0.05, CD / 2 - 0.13, false); box(CW - 0.36, 0.016, 0.032, ledMat, G, 0, top - 0.069, CD / 2 - 0.13, false)
     plane(CW, SP * 0.95, washMat, G, 0, top - SP * 0.475, -CD / 2 + 0.055)
     if (!i) plane(CW - 0.1, 0.5, aoMat, G, 0, y + 0.004, -0.2, -Math.PI / 2).scale.y = 2.4 // soft contact shadow on the solid base
   }
@@ -252,7 +260,7 @@ const spots = []
 // [x, y, z, target x, y, z, intensity, angle, castShadow] — 2 cabinet washers + 2 wall scallops flanking the cabinet
 for (const [x, y, z, tx, ty, tz, I, ang, cast] of [[-2.3, TRACK_Y, TRACK_Z, -0.6, 4.6, 0.6, 150, 0.4, true], [2.3, TRACK_Y, TRACK_Z, 0.6, 4.6, 0.6, 150, 0.4, false], [-3.65, TRACK_Y, -0.7, -3.65, 1.2, -2.2, 120, 0.5, false], [3.65, TRACK_Y, -0.7, 3.65, 1.2, -2.2, 120, 0.5, false]]) {
   const sp = new THREE.SpotLight(SPOT, I, 0, ang, 0.9, 2); sp.position.set(x, y, z); sp.target.position.set(tx, ty, tz)
-  if (cast) { sp.castShadow = true; sp.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048); sp.shadow.radius = 5; sp.shadow.bias = -0.0004; sp.shadow.normalBias = 0.03; sp.shadow.camera.near = 2; sp.shadow.camera.far = 30 }
+  if (cast) { sp.castShadow = true; sp.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048); sp.shadow.radius = 4; sp.shadow.blurSamples = 12; sp.shadow.bias = -0.00015; sp.shadow.normalBias = 0.012; sp.shadow.camera.near = 4; sp.shadow.camera.far = 16 }
   lightRig.add(sp, sp.target); spots.push(sp)
 }
 const railMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.4, metalness: 0.6 })
@@ -410,7 +418,7 @@ function inspectPose() { const c = cabinetCenter(); INS.set(0, Math.min(c.y, 2.4
 let mode = 'shelf' // shelf | fly | inspect | back | editor
 let sel = null, flyT = 0, flyFrom = null
 let open = 0, openT = 0, hubP = 0, hubT = 0, out = 0, outT = 0, discFocus = false, flip = 0, flipT = 0, spin = 0, releaseArmed = false, reseating = false
-let dirty = 3, pending = null
+let dirty = 3, pending = null, sheetK = 0, sheetT = 0, rotObj = 'case', caseAway = 0
 function setMode(m) { mode = m; applyLimits(); if (typeof updateStreaming === 'function' && entries.length) updateStreaming(); document.body.className = 'mode-' + m; $('inspect').classList.toggle('hidden', !(m === 'inspect')); $('empty').classList.toggle('hidden', entries.length > 0 || m !== 'shelf'); syncInspectUI(); dirty = 3 }
 function camShelfGoal() {
   const c = cabinetCenter(), h = NSH * SP + PLINTH, aspect = innerWidth / innerHeight
@@ -418,13 +426,12 @@ function camShelfGoal() {
   const d = Math.max(distH, distW) + CD / 2
   return { p: new THREE.Vector3(c.x + d * 0.12, c.y + 0.35, d), t: new THREE.Vector3(c.x, c.y - 0.05, 0) }
 }
+// one fixed inspect camera: opening the case, taking the disc out or pulling the cover move the ITEMS, not the view
 function camInspectGoal() {
   const d = mobile && innerWidth < innerHeight ? 5.2 : 4.0
-  if (discFocus) { const f = floatPoint(), k = model.kind === 'cart' ? 0.56 : 0.62; return { p: f.clone().add(new THREE.Vector3(0, 0.35 * k / 0.62, d * k)), t: f.clone() } }
-  const x = open > 0.4 ? -0.62 : 0
-  return { p: INS.clone().add(new THREE.Vector3(1.1 + x, 0.45, d)), t: INS.clone().add(new THREE.Vector3(x, 0, 0)) }
+  return { p: INS.clone().add(new THREE.Vector3(0.75, 0.42, d)), t: INS.clone() }
 }
-const floatPoint = () => INS.clone().add(new THREE.Vector3(0, 0.1, 1.0))
+const floatPoint = () => INS.clone().lerp(camInspectGoal().p, model.kind === 'cart' ? 0.5 : 0.4)
 let camGoal = null
 function goCam(g) { camGoal = g; auto = true }
 
@@ -444,6 +451,8 @@ async function finishFly() {
 }
 function backToShelf() {
   if (mode !== 'inspect') return
+  if (sheetT || sheetK > 0.01) { sheetT = 0; rot.reset(); syncInspectUI(); return void (pendingBack = true) }
+  if (!rot.idle) { rot.reset(); return void (pendingBack = true) }
   if (outT || out > 0.01) { reseat(); return void (pendingBack = true) }
   if (openT || open > 0.01) { openT = 0; pendingBack = true; syncInspectUI(); return }
   const m = proxies.get(sel.id); holder.visible = false; model.disc.visible = false; m.visible = true
@@ -451,13 +460,14 @@ function backToShelf() {
   mode = 'back'; document.body.className = 'mode-shelf'; $('inspect').classList.add('hidden'); goCam(camShelfGoal()); pendingBack = false
 }
 let pendingBack = false
-function pressHub() { if (mode !== 'inspect' || open < 0.65 || outT) return; reseating = false; releaseArmed = false; hubT = 1; syncInspectUI() }
-function reseat() { discFocus = false; flipT = 0; outT = 0; reseating = true; syncInspectUI(); goCam(camInspectGoal()) }
+function pressHub() { if (mode !== 'inspect' || open < 0.65 || outT || sheetK > 0) return; rot.reset(); reseating = false; releaseArmed = false; hubT = 1; syncInspectUI() }
+function reseat() { rot.reset(); discFocus = false; flipT = 0; outT = 0; reseating = true; syncInspectUI(); goCam(camInspectGoal()) }
 function syncInspectUI() {
   if (!sel) return
   $('iTitle').textContent = sel.title || ''; $('iSub').textContent = sel.sample ? t('sample') : `${{ ps5: 'PS5', ns: 'Nintendo Switch', ns2: 'Nintendo Switch 2' }[sel.platform || 'ps5']}${sel.keyCard && sel.platform === 'ns2' ? ' · Game-Key Card' : ''} · ${t('made')}`
-  $('iOpen').textContent = openT ? t('close') : t('open'); $('iOpen').disabled = !!(outT || out > 0.02 || hubT)
-  const cart = model.kind === 'cart'; $('iDisc').textContent = (outT || discFocus) ? t(cart ? 'putC' : 'put') : t(cart ? 'takeC' : 'take'); $('iDisc').disabled = !(open > 0.65) && !outT
+  $('iOpen').textContent = openT ? t('close') : t('open'); $('iOpen').disabled = !!(outT || out > 0.02 || hubT || sheetT || sheetK > 0)
+  $('iSheet').textContent = sheetT ? t('sheetIn') : t('sheetOut'); $('iSheet').disabled = !sheetT && !!(openT || open > 0.01 || outT || out > 0.01 || hubT); $('iReset').textContent = t('resetV')
+  const cart = model.kind === 'cart'; $('iDisc').textContent = (outT || discFocus) ? t(cart ? 'putC' : 'put') : t(cart ? 'takeC' : 'take'); $('iDisc').disabled = (!(open > 0.65) && !outT) || sheetK > 0
   $('iFlip').textContent = t('flip'); $('iFlip').classList.toggle('hidden', !discFocus)
   $('iEdit').disabled = !!sel.sample
 }
@@ -476,7 +486,7 @@ cv.addEventListener('pointerup', (e) => {
     for (let p = o; p; p = p.parent) { if (p === model.hub || p.name === 'hubBtn') isHub = true; if (p === model.disc) isDisc = true }
     if (discFocus) return
     if ((isHub || isDisc) && open > 0.65) pressHub()
-    else if (!openT && !outT) { openT = 1; syncInspectUI() }
+    else if (!openT && !outT && !sheetT && sheetK <= 0) { rot.reset(); openT = 1; syncInspectUI() }
   }
 })
 
@@ -484,6 +494,7 @@ cv.addEventListener('pointerup', (e) => {
 const clock = new THREE.Clock()
 const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2)
 const step = (v, tg, dt, dur) => (tg > v ? Math.min(tg, v + dt / dur) : Math.max(tg, v - dt / dur))
+const _rq = new THREE.Quaternion(), _sp = new THREE.Vector3(), _sM = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _qY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _seat = new THREE.Vector3(), _lift = new THREE.Vector3(), qFront = new THREE.Quaternion()
 function bez(a, b, c, k, out) { const u = 1 - k; return out.set(0, 0, 0).addScaledVector(a, u * u).addScaledVector(b, 2 * u * k).addScaledVector(c, k * k) }
 function tick() {
@@ -513,22 +524,41 @@ function tick() {
     if (reseating && out < 0.01) { reseating = false; hubT = 0 }
     if (outT === 1 && out > 0.92 && !discFocus) { discFocus = true; syncInspectUI(); goCam(camInspectGoal()) }
     if (pendingBack && out < 0.01 && !outT && open > 0.99 && hubP < 0.01) { openT = 0 }
-    if (pendingBack && open < 0.01 && !outT && out < 0.01) backToShelf()
+    sheetK = step(sheetK, sheetT, dt, 2.2); if (sheetK !== tick._sk) { tick._sk = sheetK; busy = true; if (sheetK === 0 || sheetK === 1) syncInspectUI() }
+    if (pendingBack && open < 0.01 && !outT && out < 0.01 && sheetK <= 0 && rot.idle) backToShelf()
     if (o0 !== open || h0 !== hubP || u0 !== out || discFocus) busy = true
     if ((o0 > 0.4) !== (open > 0.4) && auto) goCam(camInspectGoal())
-    model.pose(open, hubP)
+    // ---- item transforms (camera fixed): active object gets the user's rotation / zoom / pan
+    if (mode === 'inspect') { if (rot.update(dt)) busy = true } else rot.resetNow()
+    const act = discFocus ? 'disc' : sheetK > 0.34 ? 'sheet' : 'case'
+    if (act !== rotObj) { rotObj = act; rot.resetNow() }
+    rot.quaternion(_rq)
+    caseAway += (THREE.MathUtils.smoothstep(sheetK, 0.4, 0.9) - caseAway) * (1 - Math.exp(-dt * 12))
+    const R = model.root, oe = ease(open)
+    holder.position.copy(INS).sub(_v.set(0, Hm() / 2, 0)); holder.rotation.set(0, 0, 0)
+    R.quaternion.copy(act === 'case' ? _rq : _q.identity())
+    R.position.set(0, Hm() / 2 + 0.0005, 0).add(act === 'case' ? rot.offset(INS, _v) : _v.set(0, 0, 0)).sub(_v.set(-0.62 * oe, 0, 0).applyQuaternion(R.quaternion)).add(_v.set(-3.6 * caseAway, 0, 0))
+    if (sheetK > 0) { // flat sheet presented square to the camera, scaled to fit the view
+      const cp = camInspectGoal().p, P = _sp.copy(INS); if (act === 'sheet') P.add(rot.offset(INS, _v))
+      const dist = cp.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
+      const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.7 * vh) / model.sheetSize.h)
+      _sM.lookAt(cp, P, _up); _q.setFromRotationMatrix(_sM).multiply(_qY180); if (act === 'sheet') _q.premultiply(_rq)
+      _sM.compose(P, _q, _v.setScalar(fit)); model.setSheet(sheetK, _sM)
+    } else model.setSheet(0)
+    holder.updateMatrixWorld(true); model.pose(open, hubP)
     holder.updateMatrixWorld(true); model.seatWorld(_seat)
     const e = ease(out), F = floatPoint()
     _lift.copy(_seat).add(new THREE.Vector3(0.05, 0.12, 0.35))
     const isCart = model.kind === 'cart'; model.disc.scale.setScalar(isCart ? 1 + 1.8 * THREE.MathUtils.smoothstep(e, 0.3, 1) : 1)
-    if (out < 0.01) { model.disc.position.copy(_seat); model.disc.quaternion.copy(holder.quaternion); spin = 0 }
+    if (out < 0.01) { model.disc.position.copy(_seat); R.getWorldQuaternion(model.disc.quaternion); spin = 0 }
     else if (isCart && e < 0.35) { const k = e / 0.35; model.disc.position.lerpVectors(_seat, _lift, ease(k)); model.disc.rotation.set(-k * 0.25, 0, 0) }
     else if (e < 0.35) { const k = e / 0.35; model.disc.position.lerpVectors(_seat, _lift, ease(k)); model.disc.rotation.set(-k * 0.15, k * 0.1, 0) }
     else {
       const k = (e - 0.35) / 0.65; model.disc.position.lerpVectors(_lift, F, ease(k))
       if (discFocus && isCart) { if (!qs.has('shot')) spin += dt * 0.6; flip = step(flip, flipT, dt, 0.7); model.disc.rotation.set(-0.18, ease(flip) * Math.PI + Math.sin(spin) * 0.3, 0) }
-      else if (discFocus) { if (!qs.has('shot')) spin += dt * 0.35; flip = step(flip, flipT, dt, 0.7); model.disc.rotation.set(-0.3, ease(flip) * Math.PI, 0); model.disc.rotateZ(spin) }
+      else if (discFocus) { if (!qs.has('shot') && !rot.dragging) spin += dt * 0.35; flip = step(flip, flipT, dt, 0.7); model.disc.rotation.set(-0.3, ease(flip) * Math.PI, 0); model.disc.rotateZ(spin) }
       else model.disc.rotation.set(-0.3 * k, 0.2 * k, 0)
+      if (act === 'disc') { model.disc.quaternion.premultiply(_rq); model.disc.position.add(rot.offset(F, _v)) }
     }
     holder.visible = !(discFocus && out > 0.97)
     const ui = `${open > 0.65}|${openT}|${outT}|${hubT}|${discFocus}`; if (ui !== tick._ui) { tick._ui = ui; syncInspectUI() }
@@ -539,6 +569,8 @@ function tick() {
     if (mode === 'shelf' && !qs.has('shot')) { _v.copy(camGoal.p).add(new THREE.Vector3(par.x * 0.5, -par.y * 0.3, 0)); camera.position.lerp(_v, k) } else camera.position.lerp(camGoal.p, k); controls.target.lerp(camGoal.t, k)
     if (camera.position.distanceTo(camGoal.p) > 0.004) busy = true
   }
+  controls.enabled = mode === 'shelf'; rot.enabled = mode === 'inspect'
+  if (vignette) { const vt = mode === 'inspect' ? 0.52 : 0.32, u = vignette.uniforms.uAmt; if (Math.abs(u.value - vt) > 0.002) { u.value += (vt - u.value) * (1 - Math.exp(-dt * 5)); busy = true } }
   const changed = controls.update()
   if (busy || changed || dirty > 0) { const t0 = performance.now(); draw(); perfSample(performance.now() - t0, dt); dirty = Math.max(0, dirty - 1) }
 }
@@ -556,17 +588,19 @@ const TIERS = ['low', 'mid', 'high']
 const gpuName = (() => { try { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '' } catch { return '' } })()
 const weakGPU = /SwiftShader|llvmpipe|Mali-[GT][0-7]\d|Adreno \(TM\) [3-5]\d\d|PowerVR|Intel\(R\) (HD|UHD) Graphics [1-6]/i.test(gpuName)
 let tier = qs.get('tier') || (qs.has('shot') ? 'high' : mobile ? (weakGPU ? 'low' : 'mid') : weakGPU ? 'mid' : 'high')
-let composer = null, gtao = null, bloom = null, pinned = qs.has('tier') || qs.has('shot')
+let composer = null, gtao = null, bloom = null, vignette = null, pinned = qs.has('tier') || qs.has('shot')
 function setupTier() {
   composer?.dispose(); composer = null; gtao?.dispose?.(); gtao = null
   renderer.setPixelRatio(Math.min(devicePixelRatio, tier === 'high' ? 2 : tier === 'mid' ? 1.5 : 1))
   spots[0].castShadow = tier !== 'low'; renderer.shadowMap.needsUpdate = true
   if (tier !== 'low') {
-    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: tier === 'high' ? 4 : 0 })
+    // EffectComposer bypasses the canvas MSAA → render into a 4× multisampled HDR target (WebGL2) instead
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: renderer.capabilities.isWebGL2 === false ? 0 : 4 })
     composer = new EffectComposer(renderer, rt); composer.addPass(new RenderPass(scene, camera))
-    if (tier === 'high') { gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); gtao.blendIntensity = 0.75; gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1, scale: 1 }); composer.addPass(gtao) }
+    if (tier === 'high') { gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); gtao.blendIntensity = 0.6; gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1, scale: 1 }); composer.addPass(gtao) }
     bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.55, 1.6); composer.addPass(bloom)
-    composer.addPass(new ShaderPass(VignetteShader)); composer.addPass(new OutputPass())
+    vignette = new ShaderPass(VignetteShader); composer.addPass(vignette); composer.addPass(new OutputPass())
+    if (tier === 'high') composer.addPass(new SMAAPass()) // after tone mapping: cleans AO / specular edges MSAA can't see
   }
   sizeComposer(); dirty = 3
 }
@@ -619,6 +653,8 @@ $('importFile').onchange = async (e) => {
 $('iOpen').onclick = () => { if (outT || hubT) return; openT = openT ? 0 : 1; syncInspectUI() }
 $('iDisc').onclick = () => { if (outT || discFocus) reseat(); else pressHub() }
 $('iFlip').onclick = () => { flipT = flipT ? 0 : 1 }
+$('iSheet').onclick = () => { if (sheetT) sheetT = 0; else if (!(openT || open > 0.01 || outT || out > 0.01 || hubT)) sheetT = 1; else return; rot.reset(); syncInspectUI(); dirty = 3 }
+$('iReset').onclick = () => { rot.reset(); dirty = 3 }
 $('iBack').onclick = () => backToShelf()
 $('iDel').onclick = async () => {
   closeMenus(); if (!confirm(t('delQ').replace('%s', sel.title))) return
@@ -879,7 +915,7 @@ async function boot() {
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  window.__sc = { cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.yaw = y; rot.pitch = p || 0; rot.vy = rot.vp = 0; dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 boot()

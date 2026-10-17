@@ -326,8 +326,16 @@ bkFace.position.z = -bkT / 2 - 0.0005
 // Both are single ribbon meshes whose cross-section follows back panel → crease A → spine strip →
 // crease B → front panel. Vertices are linearly blended between the part frames each frame, so the
 // sheet bends around the living-hinge creases as the case opens (like real paper under the film).
-const wrapPaper = paperMat(null); wrapPaper.side = THREE.DoubleSide
-const wrapInnerPaper = paperMat(null); wrapInnerPaper.side = THREE.DoubleSide
+// matte coated-paper fibre: tiny bump + roughness variation (tiled across the sheet)
+function fibreTex() {
+  const n = 256, c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'); g.fillStyle = '#808080'; g.fillRect(0, 0, n, n)
+  for (let i = 0; i < 5000; i++) { const v = 100 + Math.random() * 60 | 0; g.fillStyle = `rgba(${v},${v},${v},0.35)`; g.save(); g.translate(Math.random() * n, Math.random() * n); g.rotate(Math.random() * Math.PI); g.fillRect(0, 0, 2 + Math.random() * 7, 0.7); g.restore() }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(26, 15); t.anisotropy = 4; return t
+}
+const FIBRE = fibreTex()
+const sheetPaper = (m) => { Object.assign(m, { roughness: 0.68, sheen: 0.12, bumpMap: FIBRE, bumpScale: 0.25 }); m.side = THREE.DoubleSide; return m }
+const wrapPaper = sheetPaper(paperMat(null))
+const wrapInnerPaper = sheetPaper(paperMat(null))
 const EDGE = 0.016 // insert stops ~1.6 mm short of the opening edge
 function wrapPath(o, xsBack, xsFront) {
   const pts = [] // {x,z,i,j,f}  frames: 0 base, 1 spine strip, 2 cover hinge
@@ -375,7 +383,42 @@ function updateRibbon(m) {
 function updateWrap() {
   spineG.updateMatrix(); coverHinge.updateMatrix()
   _fm[1].copy(spineG.matrix); _fm[2].multiplyMatrices(spineG.matrix, coverHinge.matrix)
-  updateRibbon(wrapIns); updateRibbon(wrapInner); updateRibbon(sleeve); hingeSkins.forEach(updateRibbon)
+  updateRibbon(sleeve); hingeSkins.forEach(updateRibbon)
+  if (sheet.k <= 0) { updateRibbon(wrapIns); updateRibbon(wrapInner) } else { updateSheet(wrapIns); updateSheet(wrapInner) }
+}
+// ---- removable cover sheet ----
+// sheet.k: 0 seated → 0.38 slid out of the sleeve top → 1 unfolded flat at sheet.pres (world matrix, set by the app).
+// Unfolding rotates the panels rigidly about the two creases (same frames as the hinge), while the whole sheet
+// travels from the case frame (snapshotted when the unfold begins) to the presentation frame.
+const sheet = { k: 0, pres: new THREE.Matrix4(), caseM: new THREE.Matrix4(), have: false }
+const _sm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()], _sq = new THREE.Quaternion(), _one = new THREE.Vector3(1, 1, 1), _Y = new THREE.Vector3(0, 1, 0)
+const _tA = new THREE.Matrix4(), _tB = new THREE.Matrix4(), _inv = new THREE.Matrix4(), _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(), _q0 = new THREE.Quaternion(), _q1 = new THREE.Quaternion(), _s0 = new THREE.Vector3(), _s1 = new THREE.Vector3(), _c = new THREE.Vector3()
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+const SHEET_CENTRE = (() => { // centre of the fully unfolded sheet in root space (for rotating about its middle)
+  const { pts } = wrapIns.userData; const q = new THREE.Quaternion().setFromAxisAngle(_Y, -Math.PI / 2)
+  const m1 = new THREE.Matrix4().compose(new THREE.Vector3(-W / 2, 0, -HALF), q, _one), m2 = m1.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(0, 0, D), q, _one)), fm = [new THREE.Matrix4(), m1, m2]
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), lo = new THREE.Vector3(1e9, 0, 1e9), hi = new THREE.Vector3(-1e9, 0, -1e9)
+  for (const p of pts) { a.copy(p.la).applyMatrix4(fm[p.i]); b.copy(p.lb).applyMatrix4(fm[p.j]); a.lerp(b, p.f); lo.min(a); hi.max(a) }
+  return lo.add(hi).multiplyScalar(0.5).setY(0)
+})()
+function updateSheet(m) {
+  const { pts, h, total } = m.userData, pos = m.geometry.attributes.position, k = sheet.k
+  const kS = smooth(0, 0.38, k), kU = smooth(0.34, 1, k), a = kU * Math.PI
+  root.updateWorldMatrix(true, false)
+  if (kU <= 0 || !sheet.have) { sheet.caseM.copy(root.matrixWorld); sheet.have = kU > 0 }
+  _sq.setFromAxisAngle(_Y, -a / 2); _sm[1].compose(spineG.position, _sq, _one); _sm[2].copy(_sm[1]).multiply(_tA.compose(coverHinge.position, _sq, _one))
+  // rigid travel: case frame (slid up, about the sheet centre) → presentation frame
+  _tA.copy(sheet.caseM).multiply(_tB.makeTranslation(SHEET_CENTRE.x * kU, kS * (INS_H + 0.06), SHEET_CENTRE.z * kU)); _tA.decompose(_p0, _q0, _s0)
+  sheet.pres.decompose(_p1, _q1, _s1)
+  _p0.lerp(_p1, kU); _q0.slerp(_q1, kU); _s0.lerp(_s1, kU); _tA.compose(_p0, _q0, _s0)
+  _inv.copy(root.matrixWorld).invert().multiply(_tA)
+  _c.copy(SHEET_CENTRE).multiplyScalar(kU)
+  pts.forEach((p, i) => {
+    _va.copy(p.la).applyMatrix4(_sm[p.i]); _vb.copy(p.lb).applyMatrix4(_sm[p.j]); _va.lerp(_vb, p.f).sub(_c)
+    _va.z -= Math.sin(Math.PI * p.s / total) * 0.03 * kU // relaxed paper bows slightly once unfolded
+    for (const [j, y] of [[0, -h / 2], [1, h / 2]]) { _vb.set(_va.x, y, _va.z).applyMatrix4(_inv); pos.setXYZ(i * 2 + j, _vb.x, _vb.y, _vb.z) }
+  })
+  pos.needsUpdate = true; m.geometry.computeVertexNormals()
 }
 // outer print resolution: 2× on capable GPUs (≈5k px wrap), capped by the GPU's max texture size
 const WRAP_RES = Math.min(mobile ? 1.5 : 2, renderer.capabilities.maxTextureSize / ((W * 2 + D + 0.1) * PX))
@@ -403,6 +446,7 @@ function wrapInnerTex(art) {
   const pw = Wc - xB
   // cover interior: back-cover style layout (photo C); tray side: dim key art behind the disc (photo B)
   // real double-sided insert of the user's copy: photo C (cover side) + photo B (tray side)
+  if (!art.innerCover && !art.innerTray) { g.fillStyle = '#efece6'; g.fillRect(0, 0, Wc, Hc); g.restore(); return tex(c) } // single-sided insert: plain paper back
   if (art.innerCover) g.drawImage(art.innerCover, 0, 0, pw, Hc)
   if (art.innerTray) g.drawImage(art.innerTray, Wc - xA, 0, xA, Hc)
   g.fillStyle = '#10141c'; g.fillRect(pw, 0, Wc - xA - pw, Hc)
@@ -547,5 +591,8 @@ disc.position.copy(seatWorld(_seat))
   }
   return { root, base, cover, coverPlate, spineG, coverHinge, hub, btn, btnHit, teeth, disc, discPick, shadowDisc, booklet, sleeve,
     shellMat, trayMat, filmMat, wrapPaper, bookletMat, bkPaper, labelMat, dataMat, updateWrap, seatWorld, setArt, pose, dispose,
-    W, H, D, HALF, TRAY_Z, DISC_X, DISC_Y, platform, kind: SPEC.kind, INS_W, INS_H }
+    W, H, D, HALF, TRAY_Z, DISC_X, DISC_Y, platform, kind: SPEC.kind, INS_W, INS_H,
+    /** k 0..1 (see updateSheet); pres = world matrix of the flat sheet (its print faces local −z) */
+    setSheet(k, pres) { sheet.k = k; if (pres) sheet.pres.copy(pres); if (k <= 0) sheet.have = false; updateWrap() },
+    sheetSize: { w: wrapIns.userData.total, h: INS_H }, sheetMeshes: [wrapIns, wrapInner] }
 }

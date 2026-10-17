@@ -311,7 +311,7 @@ export function buildArt(entry, imgs) {
   const sl = entry.slots || {}, cov = imgs.front, band = entry.band !== false
   const color = cov ? dominantColor(cov) : null
   const P = entry.platform || 'ps5', K = P === 'ns2' && !!entry.keyCard
-  const inner = genInner(imgs.inner, sl.inner?.crop, cov, color, P)
+  const inner = imgs.inner ? genInner(imgs.inner, sl.inner?.crop, cov, color, P) : null // no inner photo → plain paper back
   return {
     front: genFront(cov, sl.front?.crop, entry.title, band, P, K),
     spine: genSpine(imgs.spine, sl.spine?.crop, entry.title, color, band, P),
