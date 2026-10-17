@@ -283,7 +283,8 @@ function aimLed(ra, W, z, deg) {
 // realtime lights matched to the Cycles bake (cabinet.py: washers 350 W, down 490 W → W/4π cd; LEDs 190 W near the back)
 function useBakedLights() {
   leds.forEach((ra) => aimLed(ra, 190, -0.78, 20))
-  spots[0].intensity = spots[1].intensity = 28; spots[0].angle = spots[1].angle = 0.32; spots[0].penumbra = spots[1].penumbra = 0.8; spots[2].intensity = 39
+  spots[0].intensity = spots[1].intensity = 70; // static meshes ignore direct light, so washers only light the dynamic cases: a little above the bake (28 cd) to keep spines readable
+  spots[0].angle = spots[1].angle = 0.32; spots[0].penumbra = spots[1].penumbra = 0.8; spots[2].intensity = 39
 }
 for (let i = 0; i < NSH; i++) {
   const top = PLINTH + i * SP + SP

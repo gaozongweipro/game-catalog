@@ -94,7 +94,11 @@ function blobTex() {
 const blob = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.5), new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false }))
 blob.rotation.x = -Math.PI / 2; blob.position.y = 0.001; scene.add(blob)
 
-import { createCaseModel, W, D } from './caseModel.js'
+import { createCaseModel, loadCaseParts, W, D } from './caseModel.js'
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
+// Blender shell parts (procedural model if the GLB is missing/slow) + CC0 gallery HDRI reflections
+if (!qs.has('procedural')) await Promise.race([loadCaseParts(BASE), new Promise((r) => setTimeout(r, 15000))]).catch((e) => console.warn('[box] case GLB failed, procedural fallback', e))
+new HDRLoader().load(BASE + (mobile ? 'cab/gallery_512.hdr' : 'cab/gallery_1k.hdr'), (t) => { t.mapping = THREE.EquirectangularReflectionMapping; scene.environment = pmrem.fromEquirectangular(t).texture; t.dispose() }, undefined, () => {})
 import { loadRE4 } from './art.js'
 import { buildArt } from '../showcase/gen.js'
 const PLAT = ['ns', 'ns2'].includes(qs.get('platform')) ? qs.get('platform') : 'ps5'

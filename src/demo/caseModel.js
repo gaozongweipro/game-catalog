@@ -41,7 +41,7 @@ const LITE = mobile
 // Translucent PP (n≈1.49). Desktop: physically based transmission through the real wall thickness (Beer–Lambert
 // attenuation → deep cobalt where the light path is long, readable print/disc through one wall); mobile: alpha blend.
 // The print is OUTSIDE the shell (under the film), so the closed front never looks through the blue plastic.
-const TINT = NSW ? (IS2 ? { col: 0xffc4cb, att: 0xc80c1c, dist: 0.045, alpha: 0xd0101e, op: 0.58 } : { col: 0xf7fafc, att: 0xe8f0f6, dist: 0.6, alpha: 0xf2f5f8, op: 0.2 })
+const TINT = NSW ? (IS2 ? { col: 0xff8a96, att: 0xb00616, dist: 0.018, alpha: 0xd0101e, op: 0.58 } : { col: 0xf7fafc, att: 0xe8f0f6, dist: 0.6, alpha: 0xf2f5f8, op: 0.2 })
   : { col: 0xb4c6ff, att: 0x1544d8, dist: 0.032, alpha: 0x0028c4, op: 0.5 }
 const shellMat = LITE
   ? new THREE.MeshPhysicalMaterial({ color: TINT.alpha, roughness: 0.05, metalness: 0, transparent: true, opacity: TINT.op, ior: 1.49,
