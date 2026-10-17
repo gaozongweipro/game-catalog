@@ -1,5 +1,17 @@
 // Reusable PS5 keep-case + disc model (living hinge, one-piece wrap under film, push-hub release).
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
+// Blender-modelled shell parts (bevelled one-piece halves with finger scoop, radiused spine, clips, hub, card holder).
+// Authored in this file's group frames; when loaded they replace the procedural shell meshes, everything else
+// (hinge ribbons, wrap/sheet, sleeve, disc/card, hub press, interactions, runtime textures) stays as is.
+const PARTS = {}
+export async function loadCaseParts(base) {
+  const g = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(base + 'cab/case_parts.glb')
+  g.scene.updateMatrixWorld(true)
+  g.scene.traverse((o) => { if (o.isMesh) PARTS[o.name] = o.geometry.clone().applyMatrix4(o.matrixWorld) }) // bake node TRS into the authored frame
+  return Object.keys(PARTS)
+}
 export const PX = 800, BANNER = 118
 export const W = 1.35, H = 1.70, D = 0.135
 export const FRONT_W = 1.29 * PX, FRONT_H = 1.62 * PX, SPINE_W = Math.round((D - 0.004) * PX)
@@ -26,22 +38,25 @@ const INS_W = SPEC.insW, INS_H = SPEC.insH
 const HALF = D / 2
 
 const LITE = mobile
-// Translucent blue PP (n≈1.49). Desktop: real transmission; mobile: tuned alpha blend (cheaper, still see-through).
-const shellMat = true // v7: alpha-blended tint everywhere — transmission blurred the print seen through the shell
-  ? new THREE.MeshPhysicalMaterial({ color: 0x0028c4, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.5, ior: 1.49,
-      clearcoat: 0.4, clearcoatRoughness: 0.1, specularIntensity: 0.5, side: THREE.FrontSide, depthWrite: false })
-  : new THREE.MeshPhysicalMaterial({ color: 0x5f8cff, roughness: 0.015, metalness: 0, transmission: 1, thickness: 0.011, ior: 1.49,
-      attenuationColor: new THREE.Color(0x0a32c8), attenuationDistance: 0.16, clearcoat: 0.5, clearcoatRoughness: 0.12,
-      specularIntensity: 1, side: THREE.DoubleSide })
-if (NSW) { // NS: water-clear PP; NS2: translucent red PP ("slightly clear")
-  shellMat.color.set(IS2 ? 0xd0101e : 0xf2f5f8); shellMat.opacity = IS2 ? 0.58 : 0.2
-  shellMat.clearcoat = 0.6; shellMat.specularIntensity = 0.8
-}
+// Translucent PP (n≈1.49). Desktop: physically based transmission through the real wall thickness (Beer–Lambert
+// attenuation → deep cobalt where the light path is long, readable print/disc through one wall); mobile: alpha blend.
+// The print is OUTSIDE the shell (under the film), so the closed front never looks through the blue plastic.
+const TINT = NSW ? (IS2 ? { col: 0xffc4cb, att: 0xc80c1c, dist: 0.045, alpha: 0xd0101e, op: 0.58 } : { col: 0xf7fafc, att: 0xe8f0f6, dist: 0.6, alpha: 0xf2f5f8, op: 0.2 })
+  : { col: 0xb4c6ff, att: 0x1544d8, dist: 0.032, alpha: 0x0028c4, op: 0.5 }
+const shellMat = LITE
+  ? new THREE.MeshPhysicalMaterial({ color: TINT.alpha, roughness: 0.05, metalness: 0, transparent: true, opacity: TINT.op, ior: 1.49,
+      clearcoat: 0.4, clearcoatRoughness: 0.08, specularIntensity: 0.6, side: THREE.FrontSide, depthWrite: false })
+  : new THREE.MeshPhysicalMaterial({ color: TINT.col, roughness: 0.03, metalness: 0, transmission: 1, thickness: T, ior: 1.49,
+      attenuationColor: new THREE.Color(TINT.att), attenuationDistance: TINT.dist, clearcoat: 0.3, clearcoatRoughness: 0.06,
+      specularIntensity: 1, envMapIntensity: 1.1, side: THREE.FrontSide })
+if (NSW && LITE) { shellMat.clearcoat = 0.6; shellMat.specularIntensity = 0.8 }
 const trayMat = shellMat.clone()
-trayMat.roughness = 0.03
-trayMat.opacity = NSW ? (IS2 ? 0.5 : 0.18) : 0.42
+trayMat.roughness = 0.025
+if (LITE) trayMat.opacity = NSW ? (IS2 ? 0.5 : 0.18) : 0.42
+else trayMat.thickness = 0.006
+// clear PET sleeve: near-zero roughness so the print under it stays sharp (transmission blur scales with roughness)
 const filmMat = new THREE.MeshPhysicalMaterial({
-  color: 0xffffff, roughness: 0.06, transmission: 1, thickness: 0.0004, ior: 1.49, metalness: 0, specularIntensity: 1, transparent: true, opacity: 1,
+  color: 0xffffff, roughness: 0.012, transmission: 1, thickness: 0.0004, ior: 1.49, metalness: 0, specularIntensity: 1, transparent: true, opacity: 1,
 })
 const paperMat = (map) => new THREE.MeshPhysicalMaterial({ map, roughness: 0.55, sheen: 0.2, sheenRoughness: 0.8 })
 const bookletMat = new THREE.MeshPhysicalMaterial({ color: 0xf2efe8, roughness: 0.62, sheen: 0.15, sheenRoughness: 0.85 })
@@ -138,12 +153,12 @@ lipB.rotation.y = Math.PI; lipB.position.z = -HALF
 const TRAY_Z = -HALF + T
 const DISC_Y = NSW ? -0.5 : 0.08, DISC_X = NSW ? 0.1 : 0.03
 const tray = new THREE.Group(); tray.position.set(0, 0, TRAY_Z); base.add(tray)
-const hub = new THREE.Group(), teeth = [], btn = new THREE.Group(); let btnHit
+const hub = new THREE.Group(), teeth = [], btn = new THREE.Group(), hubBits = [], wellBits = []; let btnHit
 if (!NSW) {
 for (const [a0, a1] of [[0.32, Math.PI - 0.32], [Math.PI + 0.32, 2 * Math.PI - 0.32]]) {
-  mesh(arcSeg(0.606, 0.626, a0, a1, 0.014), trayMat, tray).position.set(DISC_X, DISC_Y, 0)
+  const w1 = mesh(arcSeg(0.606, 0.626, a0, a1, 0.014), trayMat, tray); w1.position.set(DISC_X, DISC_Y, 0)
   // shallow outer step like the moulded well in photo B
-  mesh(arcSeg(0.626, 0.648, a0 - 0.05, a1 + 0.05, 0.006), trayMat, tray, false).position.set(DISC_X, DISC_Y, 0)
+  const w2 = mesh(arcSeg(0.626, 0.648, a0 - 0.05, a1 + 0.05, 0.006), trayMat, tray, false); w2.position.set(DISC_X, DISC_Y, 0); wellBits.push(w1, w2)
 }
 const rib = new THREE.BoxGeometry(0.004, 0.16, 0.005)
 for (const [x, y, n] of [[-0.56, 0.72, 4], [0.5, 0.72, 4], [-0.56, -0.66, 4], [0.5, -0.66, 4]]) {
@@ -162,8 +177,8 @@ hub.position.set(DISC_X, DISC_Y, 0); tray.add(hub)
 function lathe(pts, seg = 64) {
   const g = new THREE.LatheGeometry(pts.map(([r, z]) => new THREE.Vector2(r, z)), seg); g.rotateX(Math.PI / 2); return g
 }
-mesh(lathe([[0.135, 0], [0.205, 0], [0.205, 0.003], [0.19, 0.0055], [0.15, 0.0055], [0.135, 0.004]]), trayMat, hub) // disc support land
-mesh(lathe([[0.086, 0], [0.104, 0], [0.104, 0.010], [0.099, 0.0125], [0.088, 0.0125]]), trayMat, hub)              // collar
+hubBits.push(mesh(lathe([[0.135, 0], [0.205, 0], [0.205, 0.003], [0.19, 0.0055], [0.15, 0.0055], [0.135, 0.004]]), trayMat, hub)) // disc support land
+hubBits.push(mesh(lathe([[0.086, 0], [0.104, 0], [0.104, 0.010], [0.099, 0.0125], [0.088, 0.0125]]), trayMat, hub))              // collar
 const N = 12, gap = 0.055
 for (let i = 0; i < N; i++) {
   const a0 = (i / N) * Math.PI * 2 + gap, a1 = ((i + 1) / N) * Math.PI * 2 - gap
@@ -205,6 +220,7 @@ btnHit.rotation.x = Math.PI / 2; btnHit.position.z = 0.012; btnHit.name = 'hubBt
   }
   const bl = mesh(new THREE.BoxGeometry(0.09, 0.012, 0.004), trayMat, hub, false); bl.position.set(0, -ch / 2 + 0.004, fd + 0.01)
   mesh(new THREE.BoxGeometry(0.09, 0.008, fd + 0.012), trayMat, hub, false).position.set(0, -ch / 2 - 0.002, (fd + 0.012) / 2)
+  hubBits.push(...hub.children)
   // top latch: square finger notch in the frame with a flexible tab + lip
   hub.add(btn); btn.position.set(0, ch / 2 + 0.002, 0)
   mesh(new THREE.BoxGeometry(0.06, 0.03, 0.006), trayMat, btn).position.set(0, 0.008, fd + 0.004)
@@ -235,8 +251,9 @@ for (const zc of [CR / 2, D - CR / 2]) {
   web.position.set(-T * 0.19, 0, zc)
 }
 // rounded spine edges: the strip's long edges are radiused into the creases (photo D)
+const spineBits = [strip]
 for (const zc of [CR, D - CR]) {
-  const ed = mesh(new THREE.CylinderGeometry(T * 0.5, T * 0.5, H - 0.012, 16), shellMat, spineG, false)
+  const ed = mesh(new THREE.CylinderGeometry(T * 0.5, T * 0.5, H - 0.012, 16), shellMat, spineG, false); spineBits.push(ed)
   ed.position.set(-T / 2, 0, zc)
 }
 // fine crease grooves visible on the outside of the spine
@@ -251,10 +268,10 @@ for (const y of [0.24, -0.24]) {
 // thin top/bottom lips on the strip (sleeve is open top & bottom → blue plastic shows)
 for (const sy of [-1, 1]) {
   const l = mesh(new THREE.BoxGeometry(T * 0.9, 0.006, D - 2 * CR), shellMat, spineG, false)
-  l.position.set(-T * 0.45, sy * (H / 2 - 0.006), D / 2)
+  l.position.set(-T * 0.45, sy * (H / 2 - 0.006), D / 2); spineBits.push(l)
   // photo D: the strip carries its own small rectangular block at each end, standing inward between the folds
   const blk = mesh(new THREE.BoxGeometry(T * 1.6, 0.05, D - 2 * CR - 0.012), shellMat, spineG, false)
-  blk.position.set(T * 0.8, sy * (H / 2 - 0.004 - 0.025), D / 2)
+  blk.position.set(T * 0.8, sy * (H / 2 - 0.004 - 0.025), D / 2); spineBits.push(blk)
 }
 const coverHinge = new THREE.Group(); coverHinge.position.set(0, 0, D); spineG.add(coverHinge)
 const cover = new THREE.Group()
@@ -301,9 +318,10 @@ function bookletClip(parent, y) {
   g.position.set(W / 2 - T - 0.002, y, HALF - T)
   return g
 }
-if (!NSW) for (const y of [0.62, -0.62]) bookletClip(cover, y)
+const clipBits = []
+if (!NSW) for (const y of [0.62, -0.62]) clipBits.push(bookletClip(cover, y))
 else for (const y of [0.3, -0.02]) { // NS/NS2: two manual clips on the tray half, spine side (Walvis photo)
-  const g = bookletClip(base, y); g.scale.set(-1, 1, -1); g.position.set(-W / 2 + T + 0.002, y, -HALF + T)
+  const g = bookletClip(base, y); g.scale.set(-1, 1, -1); g.position.set(-W / 2 + T + 0.002, y, -HALF + T); clipBits.push(g)
 }
 // thin raised rail along the opening edge on the cover interior (photo C)
 mesh(new THREE.BoxGeometry(0.006, H - 0.2, 0.006), trayMat, cover, false).position.set(W / 2 - T - 0.03, 0, HALF - T - 0.003)
@@ -371,6 +389,12 @@ const sheetG = new THREE.Group(); sheetG.name = 'coverSheet'; root.add(sheetG)
 const wrapIns = ribbon(0.0018, INS_H, wrapPaper); sheetG.add(wrapIns)
 const wrapInner = ribbon(0.0011, INS_H, wrapInnerPaper); sheetG.add(wrapInner)
 const sleeve = ribbon(0.0034, INS_H + 0.028, filmMat); sleeve.renderOrder = 2
+// sleeve edge thickness: a second skin 0.6 mm out whose alpha only keeps the folded/welded top & bottom rims,
+// so the film reads as a sheet with an edge (catches a thin highlight) instead of an infinitely thin plane
+const sleeveEdgeMat = (() => { const c = document.createElement('canvas'); c.width = 4; c.height = 256; const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 256)
+  gr.addColorStop(0, '#fff'); gr.addColorStop(0.012, '#fff'); gr.addColorStop(0.03, '#000'); gr.addColorStop(0.97, '#000'); gr.addColorStop(0.988, '#fff'); gr.addColorStop(1, '#fff'); g.fillStyle = gr; g.fillRect(0, 0, 4, 256)
+  return new THREE.MeshPhysicalMaterial({ color: 0xf4f7fa, roughness: 0.08, transparent: true, opacity: 0.55, alphaMap: new THREE.CanvasTexture(c), clearcoat: 1, depthWrite: false, side: THREE.DoubleSide }) })()
+const sleeveEdge = ribbon(0.004, INS_H + 0.028, sleeveEdgeMat); sleeveEdge.renderOrder = 2
 // Living-hinge plastic skins (outer face + thinned inner face of the flex band) — bend as smooth arcs
 const HX = [-W / 2 + 0.012, -W / 2], HXF = [-W / 2 + 0.012]
 const hingeSkins = [ribbon(0, H - 0.004, shellMat, HX, HXF), ribbon(-T * 0.62, H - 0.004, shellMat, HX, HXF)]
@@ -386,7 +410,7 @@ function updateRibbon(m) {
 function updateWrap() {
   spineG.updateMatrix(); coverHinge.updateMatrix()
   _fm[1].copy(spineG.matrix); _fm[2].multiplyMatrices(spineG.matrix, coverHinge.matrix)
-  updateRibbon(sleeve); hingeSkins.forEach(updateRibbon)
+  updateRibbon(sleeve); updateRibbon(sleeveEdge); hingeSkins.forEach(updateRibbon)
   if (sheet.k <= 0) { updateRibbon(wrapIns); updateRibbon(wrapInner) } else { updateSheet(wrapIns); updateSheet(wrapInner) }
 }
 // ---- removable cover sheet ----
@@ -580,6 +604,23 @@ disc.position.copy(seatWorld(_seat))
     ;[wrapPaper, wrapInnerPaper, labelMat, bkPaper].forEach((m) => (m.needsUpdate = true))
     old.forEach((t) => t && t.dispose())
   }
+  // ---- Blender shell parts (if loaded): swap out the procedural shell meshes, keep every group/frame and interaction ----
+  const PK = NSW ? 'ns' : 'ps5', P = (n) => PARTS[PK + '_' + n]
+  let glbParts = false
+  if (P('BaseShell')) {
+    const drop = (o) => { if (!o) return; o.parent?.remove(o); o.traverse?.((m) => m.isMesh && m.geometry.dispose()) }
+    const DBG = new URLSearchParams(location.search).get('glbHide') || ''
+    const add = (geo, mat, parent, cast = true) => { const m = new THREE.Mesh(geo, mat); m.name = Object.keys(PARTS).find((k) => PARTS[k] === geo) || ''; if (DBG && DBG.split(',').some((d) => m.name.endsWith(d))) m.visible = false; m.castShadow = cast; m.receiveShadow = true; m.userData.glb = true; parent.add(m); return m }
+    ;[backPlate, backWalls, lipB, coverPlate, coverWalls, ...spineBits, ...clipBits].forEach(drop)
+    add(P('BaseShell'), shellMat, base); add(P('CoverShell'), shellMat, cover) // cover frame == root frame when closed
+    add(P('Spine'), shellMat, spineG)
+    add(P('Clips'), trayMat, NSW ? base : cover, false)
+    if (!NSW) {
+      hubBits.forEach(drop); wellBits.forEach(drop); add(P('HubBase'), trayMat, hub)
+      teeth.forEach((t, i) => { [...t.children].forEach(drop); add(P('Tooth'), trayMat, t).rotation.z = i * 2 * Math.PI / teeth.length })
+    } else { hubBits.forEach(drop); add(P('CardHolder'), trayMat, hub) }
+    glbParts = true
+  }
   const HINGE_MAX = THREE.MathUtils.degToRad(178)
   const easeIO = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2)
   /** Apply hinge opening (0..1) and hub press (0..1) to the rig. */
@@ -592,11 +633,11 @@ disc.position.copy(seatWorld(_seat))
     for (const t of teeth) { const a = t.userData.angle, r = pe * 0.028; t.position.set(-Math.cos(a) * r, -Math.sin(a) * r, 0); t.scale.setScalar(1 - pe * 0.14) }
   }
   function dispose() {
-    for (const o of [root, disc]) { scene.remove(o); o.traverse((m) => { if (m.isMesh) { m.geometry.dispose(); const ms = Array.isArray(m.material) ? m.material : [m.material]; ms.forEach((x) => { x.map && x.map.dispose() }) } }) }
+    for (const o of [root, disc]) { o.parent?.remove(o); o.traverse((m) => { if (m.isMesh) { if (!m.userData.glb) m.geometry.dispose(); const ms = Array.isArray(m.material) ? m.material : [m.material]; ms.forEach((x) => { x.map && x.map.dispose() }) } }) }
   }
   return { root, base, cover, coverPlate, spineG, coverHinge, hub, btn, btnHit, teeth, disc, discPick, shadowDisc, booklet, sleeve,
     shellMat, trayMat, filmMat, wrapPaper, bookletMat, bkPaper, labelMat, dataMat, updateWrap, seatWorld, setArt, pose, dispose,
-    W, H, D, HALF, TRAY_Z, DISC_X, DISC_Y, platform, kind: SPEC.kind, INS_W, INS_H,
+    W, H, D, HALF, TRAY_Z, DISC_X, DISC_Y, platform, kind: SPEC.kind, INS_W, INS_H, glbParts,
     /** k 0..1 (see updateSheet); pres = world matrix of the flat sheet (its print faces local −z) */
     setSheet(k, pres) { sheet.k = k; if (pres) sheet.pres.copy(pres); if (k <= 0) sheet.have = false; updateWrap() },
     sheetSize: { w: wrapIns.userData.total, h: INS_H }, sheetMeshes: [wrapIns, wrapInner], sheetG }

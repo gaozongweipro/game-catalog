@@ -19,6 +19,10 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import { ItemRotator } from '../demo/itemRotate.js'
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
+import { LightProbeGridWebGL } from 'three/examples/jsm/lighting/LightProbeGridWebGL.js'
+import { loadBakedCabinet } from './bakedCabinet.js'
+import { loadCaseParts } from '../demo/caseModel.js'
 
 const BASE = import.meta.env.BASE_URL
 const qs = new URLSearchParams(location.search)
@@ -62,6 +66,10 @@ RectAreaLightUniformsLib.init()
 const scene = new THREE.Scene()
 const pmrem = new THREE.PMREMGenerator(renderer)
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.32
+// CC0 gallery HDRI (Poly Haven "sculpture_exhibition") for reflections; RoomEnvironment stays as the fallback
+new HDRLoader().load(BASE + (mobile ? 'cab/gallery_512.hdr' : 'cab/gallery_1k.hdr'), (t) => { t.mapping = THREE.EquirectangularReflectionMapping; scene.environment = pmrem.fromEquirectangular(t).texture; t.dispose(); scene.environmentIntensity = +(qs.get('env') || 0.4); dirty = 3 }, undefined, () => {})
+// strip probe-grid irradiance from big realtime surfaces outside the cabinet (floor/wall are lit by the spots already)
+const noProbe = (m) => { m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('#ifdef USE_LIGHT_PROBES_GRID', '#ifdef USE_LIGHT_PROBES_GRID_OFF')) }; m.customProgramCacheKey = () => 'noprobe'; return m }
 scene.background = new THREE.Color(0x1b1916)
 const camera = new THREE.PerspectiveCamera(mobile ? 46 : 36, 1, 0.05, 80)
 const controls = new OrbitControls(camera, cv)
@@ -104,7 +112,7 @@ function concreteTex() {
   for (let i = 0; i < 26000; i++) { const v = Math.random(); g.fillStyle = v < 0.5 ? `rgba(40,36,32,${Math.random() * 0.25})` : `rgba(235,230,222,${Math.random() * 0.22})`; g.fillRect(Math.random() * n, Math.random() * n, 1 + Math.random() * 2, 1 + Math.random() * 2) }
   const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(8, 8); tx.anisotropy = 8; return tx
 }
-const floorMat = new THREE.MeshPhysicalMaterial({ map: concreteTex(), color: 0x9a938b, roughness: 0.42, metalness: 0, clearcoat: 0.7, clearcoatRoughness: 0.16, envMapIntensity: 0.6 })
+const floorMat = noProbe(new THREE.MeshPhysicalMaterial({ map: concreteTex(), color: 0x9a938b, roughness: 0.42, metalness: 0, clearcoat: 0.7, clearcoatRoughness: 0.16, envMapIntensity: 0.6 }))
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(160, 60), floorMat); floor.rotation.x = -Math.PI / 2; floor.position.set(40, 0, 10); floor.receiveShadow = true; scene.add(floor)
 // back wall: warm gallery grey with a vertical gradient (lighter at eye level, darker toward ceiling + skirting)
 function wallTex() {
@@ -112,7 +120,7 @@ function wallTex() {
   gr.addColorStop(0, '#2c2824'); gr.addColorStop(0.4, '#6d655c'); gr.addColorStop(0.8, '#7d7469'); gr.addColorStop(0.97, '#6f675e'); gr.addColorStop(1, '#3a3530')
   g.fillStyle = gr; g.fillRect(0, 0, 16, 512); const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx
 }
-const wall = new THREE.Mesh(new THREE.PlaneGeometry(160, 16), new THREE.MeshStandardMaterial({ map: wallTex(), roughness: 0.95 })); wall.position.set(40, 8, -2.2); wall.receiveShadow = true; scene.add(wall)
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(160, 16), noProbe(new THREE.MeshStandardMaterial({ map: wallTex(), roughness: 0.95 }))); wall.position.set(40, 8, -2.2); wall.receiveShadow = true; scene.add(wall)
 const skirting = new THREE.Mesh(new THREE.BoxGeometry(160, 0.14, 0.04), new THREE.MeshStandardMaterial({ color: 0x2c2825, roughness: 0.6 })); skirting.position.set(40, 0.07, -2.18); scene.add(skirting)
 
 // ---------------- cabinets (solid oak, paged side by side) ----------------
@@ -241,24 +249,54 @@ function buildOne(ci) {
   }
   return G
 }
-function buildCabinets(n) {
-  if (n === nCab && cabinet.children.length) return
-  cabinet.traverse((o) => { if (o.isMesh && o.geometry && !Object.values(RB).includes(o.geometry)) o.geometry.dispose() })
-  cabinet.clear(); doors.length = 0; nCab = n
-  for (let i = 0; i < n; i++) buildOne(i)
-  page = Math.min(page, n - 1); buildFixtures(); placeLights()
+// Baked cabinet (Blender GLB + Cycles lightmap) when available; the procedural build above is the fallback.
+let BAKED = null
+const cabSlots = []
+function buildBaked(ci) {
+  const { group, doors: d } = BAKED.make(ci, ci * CAB_PITCH); cabinet.add(group); doors.push(...d)
+  plane(CW + 2 * FT + 0.9, CD + FT + 0.9, aoMat, group, 0, 0.003, 0, -Math.PI / 2) // floor contact shadow
+  return group
+}
+// lazy: only the current page and its neighbours are instantiated (clones share geometry, materials and the lightmap)
+function ensureCabs() {
+  let made = false
+  for (let i = 0; i < nCab; i++) {
+    const near = Math.abs(i - page) <= 1
+    if (near && !cabSlots[i]) { cabSlots[i] = BAKED ? buildBaked(i) : buildOne(i); made = true }
+    if (cabSlots[i]) cabSlots[i].visible = near
+  }
+  if (made) { renderer.shadowMap.needsUpdate = true; dirty = 3 }
+}
+function buildCabinets(n, force = false) {
+  if (n === nCab && cabinet.children.length && !force) { ensureCabs(); return }
+  if (!BAKED) cabinet.traverse((o) => { if (o.isMesh && o.geometry && !Object.values(RB).includes(o.geometry)) o.geometry.dispose() })
+  cabinet.clear(); doors.length = 0; cabSlots.length = 0; nCab = n
+  page = Math.min(page, n - 1); ensureCabs(); buildFixtures(); placeLights()
 }
 // one set of area lights follows the current page (RectAreaLights are expensive per fragment)
 const lightRig = new THREE.Group(); scene.add(lightRig)
+const leds = []
+function aimLed(ra, W, z, deg) {
+  const t = THREE.MathUtils.degToRad(deg), y = ra.userData.top - 0.079
+  ra.color.set(0xffe2c0); ra.width = CW - 0.36; ra.height = 0.03; ra.intensity = W / (Math.PI * ra.width * ra.height) * (mobile ? 0.85 : 1); ra.position.set(0, y, z); ra.lookAt(0, y - Math.cos(t), z - Math.sin(t))
+}
+// realtime lights matched to the Cycles bake (cabinet.py: washers 350 W, down 490 W → W/4π cd; LEDs 190 W near the back)
+function useBakedLights() {
+  leds.forEach((ra) => aimLed(ra, 190, -0.78, 20))
+  spots[0].intensity = spots[1].intensity = 28; spots[0].angle = spots[1].angle = 0.32; spots[0].penumbra = spots[1].penumbra = 0.8; spots[2].intensity = 39
+}
 for (let i = 0; i < NSH; i++) {
   const top = PLINTH + i * SP + SP
-  const ra = new THREE.RectAreaLight(0xfff0d6, mobile ? 2.2 : 2.6, CW - 0.3, 0.12); ra.position.set(0, top - 0.06, CD / 2 - 0.2); ra.lookAt(0, top - SP, CD / 2 - 0.4); lightRig.add(ra)
+  // LED grazer near the back panel: 190 W area light in the bake → luminance P / (π·A); tilted 20° toward the back like the baked one
+  // procedural cabinet: broad soft panel under each shelf front; switched to the baked rig (thin strip near the back) in useBakedLights
+  const ra = new THREE.RectAreaLight(0xfff0d6, mobile ? 2.2 : 2.6, CW - 0.3, 0.12); ra.userData.top = top; ra.position.set(0, top - 0.06, CD / 2 - 0.2); ra.lookAt(0, top - SP, CD / 2 - 0.4); lightRig.add(ra); leds.push(ra)
 }
 // track spots (≈2900K) on a ceiling rail: two wash the cabinet face with soft-edged cones, one pools light on the aisle floor
-const TRACK_Y = PLINTH + NSH * SP + FT + 3.4, TRACK_Z = 4.2, SPOT = 0xffd3a3
+const TRACK_Y = PLINTH + NSH * SP + FT + 3.4, TRACK_Z = 6.5, SPOT = 0xffd3a3
 const spots = []
 // [x, y, z, target x, y, z, intensity, angle, castShadow] — 2 cabinet washers + 2 wall scallops flanking the cabinet
-for (const [x, y, z, tx, ty, tz, I, ang, cast] of [[-2.3, TRACK_Y, TRACK_Z, -0.6, 4.6, 0.6, 150, 0.4, true], [2.3, TRACK_Y, TRACK_Z, 0.6, 4.6, 0.6, 150, 0.4, false], [-3.65, TRACK_Y, -0.7, -3.65, 1.2, -2.2, 120, 0.5, false], [3.65, TRACK_Y, -0.7, 3.65, 1.2, -2.2, 120, 0.5, false]]) {
+// same positions / cones / powers as the Cycles bake (Blender W / 4π ≈ three cd): 2 washers + overhead down-light + 2 wall scallops
+for (const [x, y, z, tx, ty, tz, I, ang, cast] of [[-2.3, TRACK_Y, TRACK_Z, -0.6, 4.6, 0.6, 150, 0.4, true], [2.3, TRACK_Y, TRACK_Z, 0.6, 4.6, 0.6, 150, 0.4, false], [0, TRACK_Y, TRACK_Z, 0, PLINTH, 0.2, 0, 0.3, false], [-3.65, TRACK_Y, -0.7, -3.65, 1.2, -2.2, 120, 0.5, false], [3.65, TRACK_Y, -0.7, 3.65, 1.2, -2.2, 120, 0.5, false]]) {
   const sp = new THREE.SpotLight(SPOT, I, 0, ang, 0.9, 2); sp.position.set(x, y, z); sp.target.position.set(tx, ty, tz)
   if (cast) { sp.castShadow = true; sp.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048); sp.shadow.radius = 4; sp.shadow.blurSamples = 12; sp.shadow.bias = -0.00015; sp.shadow.normalBias = 0.012; sp.shadow.camera.near = 4; sp.shadow.camera.far = 16 }
   lightRig.add(sp, sp.target); spots.push(sp)
@@ -276,7 +314,7 @@ function buildFixtures() {
     const stem = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.25, 0.03), railMat); stem.position.set(p.x, TRACK_Y + 0.13, p.z); fixtures.add(stem)
   }
 }
-function placeLights() { lightRig.position.x = page * CAB_PITCH; key.position.x = 4 + page * CAB_PITCH; key.target.position.x = page * CAB_PITCH; key.target.updateMatrixWorld() }
+function placeLights() { ensureCabs(); lightRig.position.x = page * CAB_PITCH; key.position.x = 4 + page * CAB_PITCH; key.target.position.x = page * CAB_PITCH; key.target.updateMatrixWorld() }
 let doorOpen = 0, doorTarget = 0
 function cabinetCenter() { return new THREE.Vector3(page * CAB_PITCH, PLINTH + (NSH * SP) / 2, 0) }
 
@@ -334,9 +372,17 @@ function computeLayout() {
 }
 function layoutTarget(id) {
   const L = LAY.get(id); if (!L) return null
-  const shelf = NSH - 1 - (L.row % ROWS_PER_CAB), y = shelfY[shelf] + 0.024 + L.s.H / 2, x = L.cab * CAB_PITCH + L.x
-  if (viewMode === 'spine') return { p: new THREE.Vector3(x, y, -0.05), r: new THREE.Euler(0, Math.PI / 2, 0), cab: L.cab }
-  return { p: new THREE.Vector3(x, y + 0.01, -0.35), r: new THREE.Euler(-0.07, 0, 0), cab: L.cab }
+  const shelf = NSH - 1 - (L.row % ROWS_PER_CAB), surf = shelf === 0 ? PLINTH : PLINTH + shelf * SP + 0.03, y = surf + 0.0015 + L.s.H / 2, x = L.cab * CAB_PITCH + L.x
+  if (viewMode === 'spine') return { p: new THREE.Vector3(x, y, -0.05), r: new THREE.Euler(0, Math.PI / 2, 0), cab: L.cab, glass: shelf > 0 }
+  return { p: new THREE.Vector3(x, y + 0.006, -0.35), r: new THREE.Euler(-0.07, 0, 0), cab: L.cab, glass: shelf > 0 }
+}
+// cheap contact shadow under every shelf case (cases are dynamic, so they can't be in the lightmap)
+const decalGeo = new THREE.PlaneGeometry(1, 1)
+const decalWood = new THREE.MeshBasicMaterial({ map: aoMat.map, transparent: true, depthWrite: false, opacity: 0.9, polygonOffset: true, polygonOffsetFactor: -2 })
+const decalGlass = decalWood.clone(); decalGlass.opacity = 0.45
+function fitDecal(m, p) {
+  let d = m.userData.decal; if (!d) { d = new THREE.Mesh(decalGeo, decalWood); d.rotation.x = -Math.PI / 2; d.renderOrder = 2; m.add(d); m.userData.decal = d }
+  const s = platformSpec(p); d.position.y = -s.H / 2 - 0.001; d.scale.set(s.W * 1.1 + 0.06, s.D * 2.4 + 0.08, 1)
 }
 // placeholder material per platform until the art is near the current page (lazy texture streaming)
 const phMats = {}
@@ -370,8 +416,9 @@ async function syncShelf(animate = true) {
   for (const [id, m] of proxies) if (!ids.has(id)) { scene.remove(m); freeMats(m); proxies.delete(id) }
   for (const e of entries) {
     let m = proxies.get(e.id)
-    if (!m) { m = new THREE.Mesh(proxyGeo(e.platform), placeholderMats(e.platform || 'ps5')); m.castShadow = true; m.receiveShadow = true; m.userData.id = e.id; m.userData.plat = e.platform || 'ps5'; scene.add(m); proxies.set(e.id, m); m.userData.fresh = true }
+    if (!m) { m = new THREE.Mesh(proxyGeo(e.platform), placeholderMats(e.platform || 'ps5')); m.castShadow = true; m.receiveShadow = true; m.userData.id = e.id; m.userData.plat = e.platform || 'ps5'; scene.add(m); proxies.set(e.id, m); m.userData.fresh = true; fitDecal(m, e.platform) }
     const L = layoutTarget(e.id); if (!L) { m.visible = false; continue }
+    m.userData.decal.material = L.glass ? decalGlass : decalWood
     m.userData.home = L; m.userData.cab = L.cab
     if (!animate || m.userData.fresh || Math.abs(L.cab - page) > 1) { m.position.copy(L.p); m.rotation.copy(L.r); if (m.userData.fresh && animate && Math.abs(L.cab - page) <= 1) { m.scale.setScalar(0.001); m.userData.pop = 0 } m.userData.fresh = false }
     else m.userData.glide = { from: m.position.clone(), q0: m.quaternion.clone(), t: 0 }
@@ -382,11 +429,11 @@ async function syncShelf(animate = true) {
 }
 async function refreshProxy(e) {
   artCache.delete(e.id); const m = proxies.get(e.id); if (!m) return
-  const art = await getArt(e); freeMats(m); m.geometry = proxyGeo(e.platform); m.userData.plat = e.platform || 'ps5'; m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
+  const art = await getArt(e); freeMats(m); m.geometry = proxyGeo(e.platform); fitDecal(m, e.platform); m.userData.plat = e.platform || 'ps5'; m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
 }
 function goPage(p, cam = true) {
   p = THREE.MathUtils.clamp(p, 0, nCab - 1); if (p === page && cam) { goCam(camShelfGoal()); return }
-  page = p; placeLights(); updateStreaming(); syncPager(); if (cam && mode === 'shelf') { goCam(camShelfGoal()); applyLimits() } dirty = 3
+  page = p; placeLights(); updateStreaming(); syncPager(); scheduleProbes(); if (cam && mode === 'shelf') { goCam(camShelfGoal()); applyLimits() } dirty = 3
 }
 function syncPager() {
   const el = $('pager'); if (!el) return; el.classList.toggle('hidden', nCab <= 1)
@@ -516,6 +563,7 @@ function tick() {
   // fly out / back
   if (mode === 'fly' || mode === 'back') {
     busy = true; flyT = Math.min(1, flyT + dt / 1.15); const m = proxies.get(sel.id), k = ease(flyT)
+    m.userData.decal.visible = mode === 'back' && k > 0.9 // the contact shadow only exists while the case sits on the shelf
     const home = m.userData.home, slideOut = home.p.clone().add(new THREE.Vector3(0, 0.05, viewMode === 'spine' ? 1.0 : 0.9))
     if (mode === 'fly') { bez(flyFrom.p, slideOut.clone().add(new THREE.Vector3(0, 0, 0.6)), INS, k, m.position); m.quaternion.slerpQuaternions(flyFrom.q, qFront, Math.min(1, k * 1.2)); if (flyT >= 1) finishFly() }
     else { _q.setFromEuler(home.r); bez(INS, slideOut.clone().add(new THREE.Vector3(0, 0, 0.6)), home.p, k, m.position); m.quaternion.slerpQuaternions(qFront, _q, k); if (flyT >= 1) { setMode('shelf'); doorTarget = 0; sel = null } }
@@ -938,13 +986,35 @@ async function boot() {
       await db.put(s); entries = await db.all(); localStorage.setItem('showcase-seeded', '1')
     }
   } catch (err) { console.warn('IndexedDB unavailable', err) }
+  await bakedReady
   await syncShelf(false)
   const g = camShelfGoal(); camera.position.copy(g.p).add(new THREE.Vector3(0.8, 0.6, 2.2)); controls.target.copy(g.t); goCam(g)
   controls.minDistance = 1.2; controls.maxDistance = 22
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  window.__sc = { vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, glb: () => model.glbParts, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
-boot()
+// ---------------- baked assets (GLB + lightmaps), procedural fallback ----------------
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])
+const bakedReady = qs.has('procedural') ? Promise.resolve() : Promise.allSettled([
+  withTimeout(loadBakedCabinet({ renderer, base: BASE, mobile, lmGain: +(qs.get('lm') || 1), mats: { doorGlass, streakMat, glassMat, glassEdge, ledMat, brass } }), 20000)
+    .then((b) => { BAKED = b; useBakedLights(); doorGlass.envMapIntensity = +(qs.get('dg') || 0.25); doorGlass.clearcoat = 0.4; streakMat.opacity = 0.1; if (nCab) buildCabinets(nCab, true); console.info('[showcase] baked cabinet ready') })
+    .catch((err) => console.warn('[showcase] baked cabinet failed, using procedural', err)),
+  withTimeout(loadCaseParts(BASE), 20000).then(() => { for (const k of Object.keys(models)) { models[k].dispose(); delete models[k] } useModel(sel?.platform || 'ps5') })
+    .catch((err) => console.warn('[showcase] case GLB failed, using procedural case', err)),
+])
+// light probe grid: captures the baked cabinet's light so dynamic cases on its shelves pick up the same bounce/tint
+let probes = null, probeTimer = 0
+function scheduleProbes() { clearTimeout(probeTimer); probeTimer = setTimeout(bakeProbes, 400) }
+function bakeProbes() {
+  if (!BAKED || mobile || tier === 'low' || qs.has('noprobe')) return
+  const inH = NSH * SP
+  if (!probes) { probes = new LightProbeGridWebGL(CW, inH, CD, 6, 6, 3); scene.add(probes) }
+  probes.position.set(page * CAB_PITCH, PLINTH + inH / 2, -0.05)
+  const hid = []; for (const o of [...proxies.values(), holder, model.disc]) if (o.visible) { o.visible = false; hid.push(o) }
+  const t0 = performance.now(); probes.bake(renderer, scene, { cubemapSize: 16, near: 0.02, far: 40 }); hid.forEach((o) => (o.visible = true))
+  console.info('[showcase] probe grid baked', Math.round(performance.now() - t0), 'ms'); dirty = 3
+}
+boot().then(scheduleProbes)
