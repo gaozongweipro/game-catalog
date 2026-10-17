@@ -659,7 +659,8 @@ async function applyLookup(r, picked) {
       // package scans (portrait, already carry platform branding) → no generated band/badge, trim the scan border
       const scan = img && img.height / img.width > 1.2 && /cdjapan/.test(r.cover || '')
       draft.slots.front = { blob, crop: { x: 0, y: 0, s: scan ? 1.04 : 1 }, auto: true }; draftImgs.front = img
-      if (scan) { draft.band = false; $('fBand').checked = false }
+      // retail art already carries its platform band/logo → generated overlay off by default (user can re-enable)
+      if (!draft.bandUser) { draft.band = false; $('fBand').checked = false }
       filled.push('cover')
     } else toast(t('lkFail'))
   }
@@ -668,7 +669,7 @@ async function applyLookup(r, picked) {
 }
 $('fTitle').addEventListener('input', () => { clearTimeout(lkTimer); lkTimer = setTimeout(() => runLookup($('fTitle').value), 350) })
 $('fTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter' && lkResults[0]) { e.preventDefault(); applyLookup(lkResults[0], true) } })
-$('fTitle').oninput = scheduleArt; $('fBand').onchange = scheduleArt
+$('fTitle').oninput = scheduleArt; $('fBand').onchange = () => { draft.bandUser = true; scheduleArt() }
 $('eCancel').onclick = () => closeEditor(false)
 $('eSave').onclick = async () => {
   draft.title = $('fTitle').value.trim()
@@ -681,7 +682,7 @@ $('eSave').onclick = async () => {
   if (!draft.title) draft.title = t('untitled')
   draft.band = $('fBand').checked
   const isNew = !editing.id
-  const e = { id: editing.id || uid(), title: draft.title, platform: draft.platform || 'ps5', keyCard: draft.platform === 'ns2' && !!draft.keyCard, lookup: draft.lookup || null, band: draft.band, slots: draft.slots, createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(), order: isNew ? entries.length : editing.order }
+  const e = { id: editing.id || uid(), title: draft.title, platform: draft.platform || 'ps5', keyCard: draft.platform === 'ns2' && !!draft.keyCard, lookup: draft.lookup || null, bandUser: !!draft.bandUser, band: draft.band, slots: draft.slots, createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(), order: isNew ? entries.length : editing.order }
   await db.put(e)
   if (isNew) entries.push(e); else entries[entries.findIndex((x) => x.id === e.id)] = e
   artCache.set(e.id, draftArt); if (!isNew) await refreshProxy(e); else artCache.set(e.id, draftArt)
@@ -778,6 +779,9 @@ async function boot() {
   for (const b of $('viewSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === viewMode))
   try {
     entries = await db.all()
+    // migrate: auto-filled (catalog/lookup) covers default to no generated band unless the user chose otherwise
+    const fix = entries.filter((e) => e.slots?.front?.auto && !e.bandUser && e.band !== false)
+    if (fix.length) { fix.forEach((e) => (e.band = false)); await db.putMany(fix) }
     if (!localStorage.getItem('showcase-seeded')) {
       const s = { id: 'sample-re4', sample: true, title: 'Resident Evil 4 Gold Edition', platform: 'ps5', order: 0, createdAt: Date.now(), slots: {} }
       await db.put(s); entries = await db.all(); localStorage.setItem('showcase-seeded', '1')

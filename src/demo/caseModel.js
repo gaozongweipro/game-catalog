@@ -468,12 +468,12 @@ discRing(0.17, 0.23, mirrorMat, 0, true)
 discRing(rH, 0.17, clearMat, 0, true)
 { // moulded stacking-ring text (mould number / BD logo) on the clear inner ring
   const c = document.createElement('canvas'); c.width = c.height = 512; const g = c.getContext('2d'); g.translate(256, 256)
-  g.fillStyle = 'rgba(255,255,255,0.9)'; g.font = '600 15px Arial'; g.textAlign = 'center'
+  g.fillStyle = 'rgba(70,72,84,1)'; g.font = '700 22px Arial'; g.textAlign = 'center'
   const txt = 'BD-ROM · 50GB · M1 · SONY DADC · 3-012 · ', r0 = 256 * (0.135 / 0.17)
   for (let i = 0, a = -Math.PI / 2; i < txt.length * 2; i++) { const ch = txt[i % txt.length]; g.save(); g.rotate(a); g.translate(0, -r0); g.fillText(ch, 0, 0); g.restore(); a += 0.07; if (a > Math.PI * 1.45) break }
   const tx = new THREE.CanvasTexture(c)
-  const m = mesh(new THREE.CircleGeometry(0.17, 64), new THREE.MeshPhysicalMaterial({ map: tx, alphaMap: tx, transparent: true, opacity: 0.35, roughness: 0.3, depthWrite: false, side: THREE.DoubleSide }), disc, false)
-  m.position.z = -0.0009; m.rotation.y = Math.PI
+  const m = mesh(new THREE.CircleGeometry(0.17, 64), new THREE.MeshPhysicalMaterial({ map: tx, alphaMap: tx, transparent: true, opacity: 0.62, roughness: 0.25, clearcoat: 1, depthWrite: false, side: THREE.DoubleSide }), disc, false)
+  m.position.z = -0.0012; m.rotation.y = Math.PI; m.renderOrder = 6
 }
 labelRing = discRing(0.17, R - 0.002, labelMat, DT, false)
 discRing(rH, 0.17, clearMat, DT, false)
