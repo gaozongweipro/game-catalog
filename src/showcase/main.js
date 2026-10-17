@@ -126,6 +126,11 @@ const skirting = new THREE.Mesh(new THREE.BoxGeometry(160, 0.14, 0.04), new THRE
 // ---------------- cabinets (solid oak, paged side by side) ----------------
 const CW = 5.7, CD = 1.9, SP = 2.2, PLINTH = 0.42, FT = 0.16 // inner width, depth, shelf pitch, plinth, frame thickness
 const NSH = 3, ROWS_PER_CAB = NSH, CAB_GAP = 0.9, CAB_PITCH = CW + 2 * FT + CAB_GAP
+// concealed compartment uplights (must match tools/blender/cabinet.py): front rail height, light depth/tilt, power
+// FL_CASE: the cases stand ~0.2 in front of the strip, so at full bake power their spines blow out at the bottom → realtime
+// share for the dynamic cases is reduced (the static cabinet only ever sees the baked value)
+const RAIL_H = 0.055, FL_Z = CD / 2 - 0.115, FL_UP = 12, FL_W = 120, FL_CASE = +(qs.get('flc') || 0.35), FL_PROC = 0.6
+const floorY = (i) => (i === 0 ? PLINTH : PLINTH + i * SP + 0.03) // top of the compartment floor (base board / glass shelf)
 let page = 0, nCab = 1
 const cabinet = new THREE.Group(); scene.add(cabinet)
 function grainCanvas(w, h, seed = 1) { // procedural oak: base colour + height (for normal) + roughness
@@ -206,12 +211,6 @@ const glassLine = new THREE.MeshBasicMaterial({ color: 0xcfeee0, transparent: tr
 // ambient occlusion of every case behind it (flat, washed-out look through closed doors)
 for (const m of [glassMat, glassEdge, doorGlass, doorGlassDS, glassLine, streakMat]) m.userData.noAO = true
 const brass = new THREE.MeshPhysicalMaterial({ color: 0xc9a46a, metalness: 1, roughness: 0.36, clearcoat: 0.2, clearcoatRoughness: 0.2 })
-const alu = new THREE.MeshPhysicalMaterial({ color: 0xb8bcc0, metalness: 1, roughness: 0.45 })
-// LED strip: opal diffuser with a soft cross-profile (bright core → dim edge) so the thin strip doesn't shimmer
-// under MSAA/bloom; moderate HDR so bloom stays a steady halo instead of flickering on sub-pixel highlights.
-const ledMat = (() => { const c = canvas(4, 64), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 64)
-  gr.addColorStop(0, '#5a5048'); gr.addColorStop(0.3, '#e9dccb'); gr.addColorStop(0.5, '#ffffff'); gr.addColorStop(0.7, '#e9dccb'); gr.addColorStop(1, '#5a5048'); g.fillStyle = gr; g.fillRect(0, 0, 4, 64)
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color().setRGB(3.4, 2.9, 2.3) }) })()
 const doors = []
 let shelfY = []
 const RB = {}
@@ -245,11 +244,11 @@ function buildOne(ci) {
       box(CW - 0.02, 0.03, 0.012, glassEdge, G, 0, y + 0.015, CD / 2 - 0.066, false)
       for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(0.03, 0.012, 0.012, brass, G, sx * (CW / 2 - 0.02), y - 0.006, sz * (CD / 2 - 0.25), false)
     } else box(CW, 0.05, CD, shelfWood, G, 0, y - 0.025, 0, false, 0.008) // solid base shelf
-    // LED housing: aluminium channel with diffuser under the shelf above
-    const top = y + SP
-    box(CW - 0.3, 0.035, 0.06, alu, G, 0, top - 0.035, CD / 2 - 0.13, false, 0.006)
-    box(CW - 0.34, 0.022, 0.045, alu, G, 0, top - 0.05, CD / 2 - 0.13, false); box(CW - 0.36, 0.016, 0.032, ledMat, G, 0, top - 0.069, CD / 2 - 0.13, false)
-    plane(CW, SP * 0.95, washMat, G, 0, top - SP * 0.475, -CD / 2 + 0.055)
+    // concealed uplight: oak front rail on the compartment floor hides the light (no visible fixture); fake wall-wash
+    // on the back panel brightest at the bottom, fading upward (the realtime area light adds the rest)
+    const top = y + SP, fy = floorY(i)
+    box(CW, RAIL_H, 0.03, frameMat, G, 0, fy + RAIL_H / 2, CD / 2 - 0.075, false, 0.006)
+    plane(CW, SP * 0.95, washMat, G, 0, fy + SP * 0.475, -CD / 2 + 0.055).rotation.z = Math.PI
     if (!i) plane(CW - 0.1, 0.5, aoMat, G, 0, y + 0.004, -0.2, -Math.PI / 2).scale.y = 2.4 // soft contact shadow on the solid base
   }
   // floor contact shadow under the cabinet
@@ -295,23 +294,22 @@ function buildCabinets(n, force = false) {
 }
 // one set of area lights follows the current page (RectAreaLights are expensive per fragment)
 const lightRig = new THREE.Group(); scene.add(lightRig)
+// Concealed floor uplights (same as cabinet.py): one area light per compartment at the FRONT edge of its floor, just
+// behind the oak rail, tilted FL_UP above horizontal toward the back panel → wall-wash brightest low, cases lit
+// softly from the front-bottom. No geometry, no emissive, nothing for bloom to catch.
 const leds = []
-function aimLed(ra, W, z, deg) {
-  const t = THREE.MathUtils.degToRad(deg), y = ra.userData.top - 0.079
-  ra.color.set(0xffe2c0); ra.width = CW - 0.36; ra.height = 0.03; ra.intensity = W / (Math.PI * ra.width * ra.height) * (mobile ? 0.85 : 1); ra.position.set(0, y, z); ra.lookAt(0, y - Math.cos(t), z - Math.sin(t))
+function aimLed(ra, W) {
+  const t = THREE.MathUtils.degToRad(FL_UP), y = ra.userData.floor + 0.028
+  ra.color.set(0xffc58a); ra.width = CW - 0.8; ra.height = 0.025; ra.intensity = W / (Math.PI * ra.width * ra.height) * (mobile ? 0.85 : 1)
+  ra.position.set(0, y, FL_Z); ra.lookAt(0, y + Math.sin(t), FL_Z - Math.cos(t))
 }
-// realtime lights matched to the Cycles bake (cabinet.py: washers 350 W, down 490 W → W/4π cd; LEDs 190 W near the back)
+// realtime lights matched to the Cycles bake (cabinet.py: washers 350 W, down 490 W → W/4π cd; uplights FL_W each)
 function useBakedLights() {
-  leds.forEach((ra) => aimLed(ra, 190, -0.78, 20))
+  leds.forEach((ra) => aimLed(ra, FL_W * FL_CASE))
   spots[0].intensity = spots[1].intensity = 70; // static meshes ignore direct light, so washers only light the dynamic cases: a little above the bake (28 cd) to keep spines readable
   spots[0].angle = spots[1].angle = 0.32; spots[0].penumbra = spots[1].penumbra = 0.8; spots[2].intensity = 39
 }
-for (let i = 0; i < NSH; i++) {
-  const top = PLINTH + i * SP + SP
-  // LED grazer near the back panel: 190 W area light in the bake → luminance P / (π·A); tilted 20° toward the back like the baked one
-  // procedural cabinet: broad soft panel under each shelf front; switched to the baked rig (thin strip near the back) in useBakedLights
-  const ra = new THREE.RectAreaLight(0xfff0d6, mobile ? 2.2 : 2.6, CW - 0.3, 0.12); ra.userData.top = top; ra.position.set(0, top - 0.06, CD / 2 - 0.2); ra.lookAt(0, top - SP, CD / 2 - 0.4); lightRig.add(ra); leds.push(ra)
-}
+for (let i = 0; i < NSH; i++) { const ra = new THREE.RectAreaLight(0xffc58a, 1, 1, 1); ra.userData.floor = floorY(i); aimLed(ra, FL_W * FL_PROC); lightRig.add(ra); leds.push(ra) }
 // track spots (≈2900K) on a ceiling rail: two wash the cabinet face with soft-edged cones, one pools light on the aisle floor
 const TRACK_Y = PLINTH + NSH * SP + FT + 3.4, TRACK_Z = 6.5, SPOT = 0xffd3a3
 const spots = []
@@ -394,8 +392,8 @@ function computeLayout() {
 function layoutTarget(id) {
   const L = LAY.get(id); if (!L) return null
   const shelf = NSH - 1 - (L.row % ROWS_PER_CAB), surf = shelf === 0 ? PLINTH : PLINTH + shelf * SP + 0.03, y = surf + 0.0015 + L.s.H / 2, x = L.cab * CAB_PITCH + L.x
-  if (viewMode === 'spine') return { p: new THREE.Vector3(x, y, -0.05), r: new THREE.Euler(0, Math.PI / 2, 0), cab: L.cab, glass: shelf > 0 }
-  return { p: new THREE.Vector3(x, y + 0.006, -0.35), r: new THREE.Euler(-0.07, 0, 0), cab: L.cab, glass: shelf > 0 }
+  if (viewMode === 'spine') return { p: new THREE.Vector3(x, y, -0.05), r: new THREE.Euler(0, Math.PI / 2, 0), cab: L.cab, glass: shelf > 0, shelf }
+  return { p: new THREE.Vector3(x, y + 0.006, -0.35), r: new THREE.Euler(-0.07, 0, 0), cab: L.cab, glass: shelf > 0, shelf }
 }
 // cheap contact shadow under every shelf case (cases are dynamic, so they can't be in the lightmap)
 const decalGeo = new THREE.PlaneGeometry(1, 1)
@@ -404,6 +402,24 @@ const decalGlass = decalWood.clone(); decalGlass.opacity = 0.45
 function fitDecal(m, p) {
   let d = m.userData.decal; if (!d) { d = new THREE.Mesh(decalGeo, decalWood); d.rotation.x = -Math.PI / 2; d.renderOrder = 2; m.add(d); m.userData.decal = d }
   const s = platformSpec(p); d.position.y = -s.H / 2 - 0.001; d.scale.set(s.W * 1.1 + 0.06, s.D * 2.4 + 0.08, 1)
+}
+// Soft shadow each case throws onto the back panel from the concealed floor uplight in front of it. The light sits low at
+// the front, so a case blocks it from the floor up; the light is a strip along x, so the shadow is wide and very soft
+// sideways (neighbours overlap and deepen, gaps leak light). The back panel is lightmapped (no realtime shadows), so this
+// is a darkening card on the panel — a child of the proxy, so visibility / removal / glides follow the case.
+const caseWallTex = (() => { const c = canvas(128, 128), g = c.getContext('2d'), id = g.createImageData(128, 128)
+  for (let j = 0; j < 128; j++) for (let i = 0; i < 128; i++) { const u = (i / 127 - 0.5) * 2, v = j / 127, a = Math.exp(-u * u * 3.2) * (1 - Math.max(0, v - 0.0) ** 2.2 * 0.55) * Math.min(1, (1 - v) * 40); const k = (j * 128 + i) * 4; id.data[k] = id.data[k + 1] = id.data[k + 2] = 255 * a; id.data[k + 3] = 255 }
+  g.putImageData(id, 0, 0); return new THREE.CanvasTexture(c) })()
+caseWallTex.flipY = false // canvas row 0 = bottom of the card (darkest at the floor, easing off toward the shelf above)
+const wallMat = new THREE.MeshBasicMaterial({ color: 0x000000, alphaMap: caseWallTex, transparent: true, opacity: 0.3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 })
+const _wq = new THREE.Quaternion(), _wv = new THREE.Vector3()
+function fitWall(m, L) {
+  if (!L) return
+  let w = m.userData.wall; if (!w) { w = new THREE.Mesh(decalGeo, wallMat); w.renderOrder = 2; w.castShadow = false; m.add(w); m.userData.wall = w }
+  const s = platformSpec(m.userData.plat), xExt = viewMode === 'spine' ? s.D : s.W, fy = floorY(L.shelf), h = (L.shelf === NSH - 1 ? NSH * SP : (L.shelf + 1) * SP) + PLINTH - fy
+  _wq.setFromEuler(L.r).invert()
+  _wv.set(L.p.x, fy + h / 2, -CD / 2 + 0.053).sub(L.p).applyQuaternion(_wq); w.position.copy(_wv); w.quaternion.copy(_wq)
+  w.scale.set(Math.max(0.3, xExt * 2.2) + 0.2, h, 1)
 }
 // placeholder material per platform until the art is near the current page (lazy texture streaming)
 const phMats = {}
@@ -439,7 +455,7 @@ async function syncShelf(animate = true) {
     let m = proxies.get(e.id)
     if (!m) { m = new THREE.Mesh(proxyGeo(e.platform), placeholderMats(e.platform || 'ps5')); m.castShadow = true; m.receiveShadow = true; m.userData.id = e.id; m.userData.plat = e.platform || 'ps5'; scene.add(m); proxies.set(e.id, m); m.userData.fresh = true; fitDecal(m, e.platform) }
     const L = layoutTarget(e.id); if (!L) { m.visible = false; continue }
-    m.userData.decal.material = L.glass ? decalGlass : decalWood
+    m.userData.decal.material = L.glass ? decalGlass : decalWood; fitWall(m, L)
     m.userData.home = L; m.userData.cab = L.cab
     if (!animate || m.userData.fresh || Math.abs(L.cab - page) > 1) { m.position.copy(L.p); m.rotation.copy(L.r); if (m.userData.fresh && animate && Math.abs(L.cab - page) <= 1) { m.scale.setScalar(0.001); m.userData.pop = 0 } m.userData.fresh = false }
     else m.userData.glide = { from: m.position.clone(), q0: m.quaternion.clone(), t: 0 }
@@ -450,7 +466,7 @@ async function syncShelf(animate = true) {
 }
 async function refreshProxy(e) {
   artCache.delete(e.id); const m = proxies.get(e.id); if (!m) return
-  const art = await getArt(e); freeMats(m); m.geometry = proxyGeo(e.platform); fitDecal(m, e.platform); m.userData.plat = e.platform || 'ps5'; m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
+  const art = await getArt(e); freeMats(m); m.geometry = proxyGeo(e.platform); fitDecal(m, e.platform); m.userData.plat = e.platform || 'ps5'; fitWall(m, m.userData.home); m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
 }
 function goPage(p, cam = true) {
   p = THREE.MathUtils.clamp(p, 0, nCab - 1); if (p === page && cam) { goCam(camShelfGoal()); return }
@@ -585,6 +601,7 @@ function tick() {
   if (mode === 'fly' || mode === 'back') {
     busy = true; flyT = Math.min(1, flyT + dt / 1.15); const m = proxies.get(sel.id), k = ease(flyT)
     m.userData.decal.visible = mode === 'back' && k > 0.9 // the contact shadow only exists while the case sits on the shelf
+    if (m.userData.wall) m.userData.wall.visible = m.userData.decal.visible
     const home = m.userData.home, slideOut = home.p.clone().add(new THREE.Vector3(0, 0.05, viewMode === 'spine' ? 1.0 : 0.9))
     if (mode === 'fly') { bez(flyFrom.p, slideOut.clone().add(new THREE.Vector3(0, 0, 0.6)), INS, k, m.position); m.quaternion.slerpQuaternions(flyFrom.q, qFront, Math.min(1, k * 1.2)); if (flyT >= 1) finishFly() }
     else { _q.setFromEuler(home.r); bez(INS, slideOut.clone().add(new THREE.Vector3(0, 0, 0.6)), home.p, k, m.position); m.quaternion.slerpQuaternions(qFront, _q, k); if (flyT >= 1) { setMode('shelf'); doorTarget = 0; sel = null } }
@@ -1020,7 +1037,7 @@ async function boot() {
 // ---------------- baked assets (GLB + lightmaps), procedural fallback ----------------
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])
 const bakedReady = qs.has('procedural') ? Promise.resolve() : Promise.allSettled([
-  withTimeout(loadBakedCabinet({ renderer, base: BASE, mobile, lmGain: +(qs.get('lm') || 1), mats: { doorGlass, streakMat, glassMat, glassEdge, glassLine, ledMat, brass } }), 20000)
+  withTimeout(loadBakedCabinet({ renderer, base: BASE, mobile, lmGain: +(qs.get('lm') || 1), mats: { doorGlass, streakMat, glassMat, glassEdge, glassLine, brass } }), 20000)
     .then((b) => { BAKED = b; useBakedLights(); if (nCab) buildCabinets(nCab, true); console.info('[showcase] baked cabinet ready') })
     .catch((err) => console.warn('[showcase] baked cabinet failed, using procedural', err)),
   withTimeout(loadCaseParts(BASE), 20000).then(() => { for (const k of Object.keys(models)) { models[k].dispose(); delete models[k] } useModel(sel?.platform || 'ps5') })

@@ -49,7 +49,6 @@ export async function loadBakedCabinet({ renderer, base, mobile, mats, lmGain = 
         return M[m.name]
       case 'ShelfGlass': return mats.glassMat
       case 'GlassEdge': return mats.glassEdge
-      case 'LED': return mats.ledMat
       case 'DoorGlass': return mats.doorGlass
       default: return m
     }
@@ -68,7 +67,6 @@ export async function loadBakedCabinet({ renderer, base, mobile, mats, lmGain = 
       const line = (cx, cy, lw, lh) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(lw, lh), mats.glassLine); m.position.set(cx, cy, z); m.renderOrder = 4; m.castShadow = false; o.add(m) }
       line((x0 + x1) / 2, y0, x1 - x0, w); line((x0 + x1) / 2, y1, x1 - x0, w); line(left ? x0 : x1, (y0 + y1) / 2, w, y1 - y0)
     }
-    else if (o.material === mats.ledMat) { o.castShadow = false }
     else { o.castShadow = true; o.receiveShadow = !isStatic }
   })
   return {

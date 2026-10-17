@@ -7,7 +7,10 @@ A = '/workspace/proto-assets/'; OUT = A + 'cab/'; t0 = time.time()
 def log(*a): print('[cab %5.0fs]' % (time.time() - t0), *a, flush=True)
 bpy.ops.wm.read_factory_settings(use_empty=True)
 sc = bpy.context.scene
-LZ = float(os.environ.get('LED_Z', '-0.78'))  # LED channel depth (three z): near the back panel → grazing wash
+RAIL_H = 0.055                                   # front rail height (hides the uplight from normal viewing angles)
+FL_Z, FL_UP = 1.9 / 2 - 0.115, float(os.environ.get('FL_UP', '12'))   # uplight depth (three z, just behind the rail) / tilt above horizontal
+FL_W = float(os.environ.get('FL_W', '120'))      # W per compartment (Blender area light)
+FL_COL = (1.0, 0.76, 0.52)                       # ~3000 K
 RES = int(os.environ.get('BAKE_RES', '2048')); SAMPLES = int(os.environ.get('BAKE_SAMPLES', '128')); AO_RES = RES // 2
 sc.render.engine = 'CYCLES'; sc.cycles.device = 'CPU'; sc.cycles.samples = SAMPLES; sc.cycles.use_denoising = False
 sc.cycles.max_bounces = 6; sc.cycles.diffuse_bounces = 4; sc.cycles.glossy_bounces = 2; sc.cycles.transmission_bounces = 4; sc.cycles.caustics_reflective = False; sc.cycles.caustics_refractive = False
@@ -91,14 +94,14 @@ for i in range(NSH):
         G.append(tbox('GEdge%d' % i, CW - 0.02, 0.03, 0.012, 0, y + 0.015, CD / 2 - 0.066, gedge, 0.003, 1, 2))
         for sx in (-1, 1):
             for sz in (-1, 1): P.append(tcyl('Pin', 0.007, 0.05, sx * (CW / 2 - 0.02), y - 0.006, sz * (CD / 2 - 0.25), brass, 'X', 16))
-    P.append(tbox('Chan%d' % i, CW - 0.3, 0.035, 0.06, 0, top - 0.035, LZ, alu, 0.006))
-    P.append(tbox('ChanIn%d' % i, CW - 0.34, 0.022, 0.045, 0, top - 0.05, LZ, alu, 0.003))
-    L.append(tbox('LED%d' % i, CW - 0.36, 0.016, 0.032, 0, top - 0.069, LZ, led, 0.004, 1, 2))
+    # concealed uplight: oak front rail on each compartment floor hides a floor-level light that washes the back panel
+    fy = PLINTH if i == 0 else y + 0.03
+    P.append(tbox('Rail%d' % i, CW, RAIL_H, 0.03, 0, fy + RAIL_H / 2, CD / 2 - 0.075, oak, 0.006))
 def join(objs, name):
     bpy.ops.object.select_all(action='DESELECT')
     for o in objs: o.select_set(True)
     bpy.context.view_layer.objects.active = objs[0]; bpy.ops.object.join(); o = bpy.context.active_object; o.name = name; o.data.name = name; return o
-cab = join(P, 'CabStatic'); glassO = join(G, 'ShelfGlass'); ledO = join(L, 'LEDStrips')
+cab = join(P, 'CabStatic'); glassO = join(G, 'ShelfGlass')
 # drop faces nobody can see (rear faces against the wall, undersides on the floor) so the lightmap atlas
 # spends its texels on visible surfaces only
 bm = bmesh.new(); bm.from_mesh(cab.data)
@@ -149,13 +152,13 @@ SPA, SPB = float(os.environ.get('SPOT_ANG', '0.32')), float(os.environ.get('SPOT
 spot('WashL', (-2.3, TRACK_Y, TRACK_Z), (-0.6, 4.6, 0.6), SPW, SPA, SPB)
 spot('WashR', (2.3, TRACK_Y, TRACK_Z), (0.6, 4.6, 0.6), SPW, SPA, SPB)
 spot('Down', (0, TRACK_Y, TRACK_Z), (0, PLINTH, 0.2), SPW * float(os.environ.get('DOWN_K', '1.4')), 0.3, 0.8, 0.15)   # warm overhead pool into the cabinet
-LEDW = float(os.environ.get('LED_W', '190'))
-for i in range(NSH):
-    top = PLINTH + i * SP + SP
-    l = bpy.data.lights.new('LED%d' % i, 'AREA'); l.shape = 'RECTANGLE'; l.size = CW - 0.36; l.size_y = 0.03; l.energy = LEDW; l.color = (1, 0.88, 0.72)
-    o = link(bpy.data.objects.new('LEDA%d' % i, l)); o.location = T(0, top - 0.079, LZ); o.rotation_euler = (math.radians(float(os.environ.get('LED_TILT', '20'))), 0, 0)   # emits along -Z (down), tilted toward the back panel (+Y in Blender)
+for i in range(NSH):   # floor uplights: front edge of each compartment floor, aimed back/up at the back panel
+    fy = PLINTH if i == 0 else PLINTH + i * SP + 0.03
+    l = bpy.data.lights.new('FL%d' % i, 'AREA'); l.shape = 'RECTANGLE'; l.size = CW - 0.8; l.size_y = 0.025; l.energy = FL_W; l.color = FL_COL
+    o = link(bpy.data.objects.new('FLA%d' % i, l)); o.location = T(0, fy + 0.028, FL_Z)
+    u = math.radians(FL_UP); d = T(0, math.sin(u), -math.cos(u)); o.rotation_euler = d.to_track_quat('-Z', 'Y').to_euler()
 fl = tbox('Floor', 30, 0.02, 12, 0, -0.01, 2, greym); wall = tbox('Wall', 30, 14, 0.02, 0, 7, -2.2, greym)
-for o in [glassO, ledO] + [c for d in doors for c in d.children]: o.hide_render = True   # doors/glass/LED mesh excluded from the bake (LED light = area lights)
+for o in [glassO] + [c for d in doors for c in d.children]: o.hide_render = True   # doors/glass/LED mesh excluded from the bake (LED light = area lights)
 for o in doors: o.hide_render = True
 
 # ---------------- bake → EXR → OIDN denoise → encoded 8-bit ----------------
@@ -198,7 +201,7 @@ json.dump(meta, open(OUT + 'meta.json', 'w')); fl.hide_render = wall.hide_render
 
 # ---------------- export (geometry only; textures ship separately) ----------------
 bpy.ops.object.select_all(action='DESELECT')
-for o in [cab, glassO, ledO] + doors + [c for d in doors for c in d.children]: o.select_set(True)
+for o in [cab, glassO] + doors + [c for d in doors for c in d.children]: o.select_set(True)
 bpy.ops.export_scene.gltf(filepath=OUT + 'cabinet_raw.glb', use_selection=True, export_format='GLB', export_apply=True, export_image_format='NONE',
     export_texcoords=True, export_normals=True, export_lights=False, export_cameras=False, export_materials='EXPORT')
 log('DONE')
