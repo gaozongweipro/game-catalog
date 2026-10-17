@@ -93,3 +93,6 @@ button:disabled{opacity:.38;cursor:default}
 .pager{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--ink)}.pager button{background:#f1f4f2;border-radius:999px;width:30px;height:30px;font-size:18px}.pager button:disabled{opacity:.35}.pager select{max-width:120px}
 body:not(.mode-shelf) .shelfbar{display:none}
 @media (max-width:700px){.shelfbar{bottom:84px;border-radius:18px;max-width:calc(100vw - 20px)}.shelfbar input{width:110px}}
+/* gallery scene is darker: overlay titles go light with a soft shadow */
+.brand b,.ihead h2{color:#f4efe7;text-shadow:0 1px 6px rgba(0,0,0,.45)}.brand span,.ihead p{color:rgba(240,232,220,.72);text-shadow:0 1px 4px rgba(0,0,0,.4)}
+html,body{background:#1b1916}

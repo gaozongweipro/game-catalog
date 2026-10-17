@@ -8,8 +8,15 @@ import { createCaseModel, platformSpec, W, H, D } from '../demo/caseModel.js'
 import { loadRE4 } from '../demo/art.js'
 import { db, uid, exportCollection, importCollection } from './db.js'
 import { searchCatalog, searchWiki, fetchImageBlob, loadCatalog, norm } from './lookup.js'
+import { resample, bitmapSize, prepareRetail } from './gen.js'
 import { TEMPLATES, templatesFor, NS_BAND, NS2_BAND, NS2_FRAME, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt } from './gen.js'
 import { BANNER } from '../demo/caseModel.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 
 const BASE = import.meta.env.BASE_URL
 const qs = new URLSearchParams(location.search)
@@ -46,12 +53,14 @@ const cv = $('c')
 const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, preserveDrawingBuffer: qs.has('shot') })
 renderer.setPixelRatio(Math.min(devicePixelRatio, mobile ? 1.5 : 2))
 renderer.outputColorSpace = THREE.SRGBColorSpace
-renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95
+// Khronos PBR Neutral keeps print colours (covers) hue-accurate while still rolling off highlights
+renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap
 RectAreaLightUniformsLib.init()
 const scene = new THREE.Scene()
 const pmrem = new THREE.PMREMGenerator(renderer)
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.6
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.32
+scene.background = new THREE.Color(0x1b1916)
 const camera = new THREE.PerspectiveCamera(mobile ? 46 : 36, 1, 0.05, 80)
 const controls = new OrbitControls(camera, cv)
 controls.enableDamping = true; controls.dampingFactor = 0.08; controls.screenSpacePanning = true
@@ -78,11 +87,29 @@ function clampPan() {
 const par = new THREE.Vector2()
 addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') par.set(e.clientX / innerWidth - 0.5, e.clientY / innerHeight - 0.5) })
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0xe8e2d6, 0.25); scene.add(hemi)
-const key = new THREE.DirectionalLight(0xfff4e6, 1.3); key.position.set(4, 9, 8); key.castShadow = true
+// ---------------- gallery lighting ----------------
+// Dim warm room fill; the exhibit is lit by 2900K track spots + per-shelf LED grazers (lightRig below).
+const hemi = new THREE.HemisphereLight(0xfff3e4, 0x5a5048, 0.12); scene.add(hemi)
+const key = new THREE.DirectionalLight(0xffe9d2, 0.32); key.position.set(4, 9, 8); key.castShadow = false
 key.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048); key.shadow.radius = 6; key.shadow.bias = -0.0005; key.shadow.normalBias = 0.02
 Object.assign(key.shadow.camera, { left: -6, right: 6, top: 9, bottom: -1, near: 1, far: 30 }); scene.add(key); scene.add(key.target)
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.ShadowMaterial({ opacity: 0.12 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor)
+// polished micro-terrazzo / concrete floor: low roughness + clearcoat gives soft reflections of the spot pools
+function concreteTex() {
+  const n = 1024, c = canvas(n, n), g = c.getContext('2d'); g.fillStyle = '#8e8780'; g.fillRect(0, 0, n, n)
+  for (let i = 0; i < 26; i++) { const x = Math.random() * n, y = Math.random() * n, r = 80 + Math.random() * 260, gr = g.createRadialGradient(x, y, 0, x, y, r); const v = Math.random() < 0.5 ? '255,250,240' : '60,55,50'; gr.addColorStop(0, `rgba(${v},0.07)`); gr.addColorStop(1, `rgba(${v},0)`); g.fillStyle = gr; g.fillRect(0, 0, n, n) }
+  for (let i = 0; i < 26000; i++) { const v = Math.random(); g.fillStyle = v < 0.5 ? `rgba(40,36,32,${Math.random() * 0.25})` : `rgba(235,230,222,${Math.random() * 0.22})`; g.fillRect(Math.random() * n, Math.random() * n, 1 + Math.random() * 2, 1 + Math.random() * 2) }
+  const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(8, 8); tx.anisotropy = 8; return tx
+}
+const floorMat = new THREE.MeshPhysicalMaterial({ map: concreteTex(), color: 0x9a938b, roughness: 0.42, metalness: 0, clearcoat: 0.7, clearcoatRoughness: 0.16, envMapIntensity: 0.6 })
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(160, 60), floorMat); floor.rotation.x = -Math.PI / 2; floor.position.set(40, 0, 10); floor.receiveShadow = true; scene.add(floor)
+// back wall: warm gallery grey with a vertical gradient (lighter at eye level, darker toward ceiling + skirting)
+function wallTex() {
+  const c = canvas(16, 512), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 512)
+  gr.addColorStop(0, '#2c2824'); gr.addColorStop(0.4, '#6d655c'); gr.addColorStop(0.8, '#7d7469'); gr.addColorStop(0.97, '#6f675e'); gr.addColorStop(1, '#3a3530')
+  g.fillStyle = gr; g.fillRect(0, 0, 16, 512); const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx
+}
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(160, 16), new THREE.MeshStandardMaterial({ map: wallTex(), roughness: 0.95 })); wall.position.set(40, 8, -2.2); wall.receiveShadow = true; scene.add(wall)
+const skirting = new THREE.Mesh(new THREE.BoxGeometry(160, 0.14, 0.04), new THREE.MeshStandardMaterial({ color: 0x2c2825, roughness: 0.6 })); skirting.position.set(40, 0.07, -2.18); scene.add(skirting)
 
 // ---------------- cabinets (solid oak, paged side by side) ----------------
 const CW = 5.7, CD = 1.9, SP = 2.2, PLINTH = 0.42, FT = 0.16 // inner width, depth, shelf pitch, plinth, frame thickness
@@ -141,14 +168,14 @@ function linenTex() {
   for (let i = 0; i < 9000; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '120,105,85'},${Math.random() * 0.05})`; g.fillRect(Math.random() * 512, Math.random() * 512, 1 + Math.random() * 3, 1) }
   const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(3, 3); return tx
 }
-const backMat = new THREE.MeshStandardMaterial({ map: linenTex(), color: 0xd2cbc0, roughness: 0.92 })
+const backMat = new THREE.MeshStandardMaterial({ map: linenTex(), color: 0xb3aa9d, roughness: 0.92 })
 // 10 mm float glass: faint green body, strong clearcoat reflections of the room env, green edges
 const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xeaf6f0, roughness: 0.03, metalness: 0, transparent: true, opacity: 0.22, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, envMapIntensity: 1.4, depthWrite: false })
 const glassEdge = new THREE.MeshPhysicalMaterial({ color: 0x6fb89a, roughness: 0.08, transparent: true, opacity: 0.85, clearcoat: 1, envMapIntensity: 1.2 })
 const doorGlass = new THREE.MeshPhysicalMaterial({ color: 0xf4fbf8, roughness: 0.02, transparent: true, opacity: 0.06, clearcoat: 1, clearcoatRoughness: 0.02, specularIntensity: 1, envMapIntensity: 1.6, depthWrite: false, side: THREE.DoubleSide })
 const brass = new THREE.MeshPhysicalMaterial({ color: 0xc9a46a, metalness: 1, roughness: 0.28, clearcoat: 0.3 })
 const alu = new THREE.MeshPhysicalMaterial({ color: 0xb8bcc0, metalness: 1, roughness: 0.35 })
-const ledMat = new THREE.MeshBasicMaterial({ color: 0xfff1d8 })
+const ledMat = new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(5.2, 4.3, 3.2) }) // HDR → picked up by bloom
 const doors = []
 let shelfY = []
 const RB = {}
@@ -211,13 +238,35 @@ function buildCabinets(n) {
   cabinet.traverse((o) => { if (o.isMesh && o.geometry && !Object.values(RB).includes(o.geometry)) o.geometry.dispose() })
   cabinet.clear(); doors.length = 0; nCab = n
   for (let i = 0; i < n; i++) buildOne(i)
-  page = Math.min(page, n - 1); placeLights()
+  page = Math.min(page, n - 1); buildFixtures(); placeLights()
 }
 // one set of area lights follows the current page (RectAreaLights are expensive per fragment)
 const lightRig = new THREE.Group(); scene.add(lightRig)
 for (let i = 0; i < NSH; i++) {
   const top = PLINTH + i * SP + SP
   const ra = new THREE.RectAreaLight(0xfff0d6, mobile ? 2.2 : 2.6, CW - 0.3, 0.12); ra.position.set(0, top - 0.06, CD / 2 - 0.2); ra.lookAt(0, top - SP, CD / 2 - 0.4); lightRig.add(ra)
+}
+// track spots (≈2900K) on a ceiling rail: two wash the cabinet face with soft-edged cones, one pools light on the aisle floor
+const TRACK_Y = PLINTH + NSH * SP + FT + 3.4, TRACK_Z = 4.2, SPOT = 0xffd3a3
+const spots = []
+// [x, y, z, target x, y, z, intensity, angle, castShadow] — 2 cabinet washers + 2 wall scallops flanking the cabinet
+for (const [x, y, z, tx, ty, tz, I, ang, cast] of [[-2.3, TRACK_Y, TRACK_Z, -0.6, 4.6, 0.6, 150, 0.4, true], [2.3, TRACK_Y, TRACK_Z, 0.6, 4.6, 0.6, 150, 0.4, false], [-3.65, TRACK_Y, -0.7, -3.65, 1.2, -2.2, 120, 0.5, false], [3.65, TRACK_Y, -0.7, 3.65, 1.2, -2.2, 120, 0.5, false]]) {
+  const sp = new THREE.SpotLight(SPOT, I, 0, ang, 0.9, 2); sp.position.set(x, y, z); sp.target.position.set(tx, ty, tz)
+  if (cast) { sp.castShadow = true; sp.shadow.mapSize.set(mobile ? 1024 : 2048, mobile ? 1024 : 2048); sp.shadow.radius = 5; sp.shadow.bias = -0.0004; sp.shadow.normalBias = 0.03; sp.shadow.camera.near = 2; sp.shadow.camera.far = 30 }
+  lightRig.add(sp, sp.target); spots.push(sp)
+}
+const railMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.4, metalness: 0.6 })
+const rail = new THREE.Mesh(new THREE.BoxGeometry(160, 0.06, 0.08), railMat); rail.position.set(40, TRACK_Y + 0.25, TRACK_Z); scene.add(rail); const rail2 = rail.clone(); rail2.position.z = -0.7; scene.add(rail2)
+const canGeo = new THREE.CylinderGeometry(0.11, 0.13, 0.42, 20, 1, true), canMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.35, metalness: 0.7, side: THREE.DoubleSide })
+const fixtures = new THREE.Group(); scene.add(fixtures)
+function buildFixtures() {
+  fixtures.clear()
+  for (let i = 0; i < nCab; i++) for (const sp of spots) {
+    if (sp.position.z < 0 && i > 0 && sp.position.x < 0) continue // shared scallop between neighbours
+    const can = new THREE.Mesh(canGeo, canMat), p = new THREE.Vector3(sp.position.x + i * CAB_PITCH, TRACK_Y, sp.position.z); can.position.copy(p)
+    can.lookAt(new THREE.Vector3(sp.target.position.x + i * CAB_PITCH, sp.target.position.y, sp.target.position.z)); can.rotateX(Math.PI / 2); fixtures.add(can)
+    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.25, 0.03), railMat); stem.position.set(p.x, TRACK_Y + 0.13, p.z); fixtures.add(stem)
+  }
 }
 function placeLights() { lightRig.position.x = page * CAB_PITCH; key.position.x = 4 + page * CAB_PITCH; key.target.position.x = page * CAB_PITCH; key.target.updateMatrixWorld() }
 let doorOpen = 0, doorTarget = 0
@@ -239,10 +288,11 @@ function proxyGeo(p) {
   g.setIndex(out); g.clearGroups(); ng.forEach((x) => g.addGroup(x.start, x.count, x.materialIndex)); return (proxyGeos[k] = g)
 }
 let entries = [], proxies = new Map(), artCache = new Map(), viewMode = localStorage.getItem('showcase-view') || 'spine'
-const TEXMAX = mobile ? 512 : 768
+const TEXMAX = mobile ? (devicePixelRatio > 2 && (navigator.hardwareConcurrency || 4) > 4 ? 1024 : 512) : 1024
 function shrink(src, max) {
-  const s = Math.min(1, max / Math.max(src.width, src.height)); const c = canvas(Math.max(2, Math.round(src.width * s)), Math.max(2, Math.round(src.height * s)))
-  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height); const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return tx
+  const [bw, bh] = src instanceof HTMLCanvasElement ? bitmapSize(src) : [src.width, src.height]
+  const c = resample(src, Math.min(1, max / Math.max(bw, bh)))
+  const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = renderer.capabilities.getMaxAnisotropy(); return tx
 }
 function proxyMats(art, p = 'ps5') {
   const tintMat = tintMats[p] || tintMats.ps5
@@ -344,7 +394,7 @@ let model = null
 function useModel(p) {
   p = ['ns', 'ns2'].includes(p) ? p : 'ps5'
   if (!models[p]) {
-    const m = createCaseModel({ renderer, scene, mobile, maxAniso: mobile ? 4 : 8, platform: p })
+    const m = createCaseModel({ renderer, scene, mobile, maxAniso: renderer.capabilities.getMaxAnisotropy(), platform: p })
     holder.add(m.root); m.disc.visible = false; m.root.traverse((o) => { if (o.isMesh) o.castShadow = true }); models[p] = m
   }
   const wasVis = model ? model.disc.visible : false
@@ -490,13 +540,49 @@ function tick() {
     if (camera.position.distanceTo(camGoal.p) > 0.004) busy = true
   }
   const changed = controls.update()
-  if (busy || changed || dirty > 0) { renderer.render(scene, camera); dirty = Math.max(0, dirty - 1) }
+  if (busy || changed || dirty > 0) { const t0 = performance.now(); draw(); perfSample(performance.now() - t0, dt); dirty = Math.max(0, dirty - 1) }
 }
 renderer.setAnimationLoop(tick)
 document.addEventListener('visibilitychange', () => renderer.setAnimationLoop(document.hidden ? null : tick))
 
+// ---------------- post-processing tiers ----------------
+// high: GTAO + bloom + vignette @ full DPR · mid: bloom + vignette @ ≤1.5 DPR · low: direct render @ 1 DPR, no shadows on cabinets' spot 2.
+const VignetteShader = {
+  uniforms: { tDiffuse: { value: null }, uAmt: { value: 0.32 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: 'uniform sampler2D tDiffuse; uniform float uAmt; varying vec2 vUv; void main(){ vec4 c = texture2D(tDiffuse, vUv); vec2 d = vUv - 0.5; float v = smoothstep(0.85, 0.2, length(d * vec2(1.0, 0.85))); c.rgb *= mix(1.0 - uAmt, 1.0, v); gl_FragColor = c; }',
+}
+const TIERS = ['low', 'mid', 'high']
+const gpuName = (() => { try { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '' } catch { return '' } })()
+const weakGPU = /SwiftShader|llvmpipe|Mali-[GT][0-7]\d|Adreno \(TM\) [3-5]\d\d|PowerVR|Intel\(R\) (HD|UHD) Graphics [1-6]/i.test(gpuName)
+let tier = qs.get('tier') || (qs.has('shot') ? 'high' : mobile ? (weakGPU ? 'low' : 'mid') : weakGPU ? 'mid' : 'high')
+let composer = null, gtao = null, bloom = null, pinned = qs.has('tier') || qs.has('shot')
+function setupTier() {
+  composer?.dispose(); composer = null; gtao?.dispose?.(); gtao = null
+  renderer.setPixelRatio(Math.min(devicePixelRatio, tier === 'high' ? 2 : tier === 'mid' ? 1.5 : 1))
+  spots[0].castShadow = tier !== 'low'; renderer.shadowMap.needsUpdate = true
+  if (tier !== 'low') {
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: tier === 'high' ? 4 : 0 })
+    composer = new EffectComposer(renderer, rt); composer.addPass(new RenderPass(scene, camera))
+    if (tier === 'high') { gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); gtao.blendIntensity = 0.75; gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1, scale: 1 }); composer.addPass(gtao) }
+    bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.55, 1.6); composer.addPass(bloom)
+    composer.addPass(new ShaderPass(VignetteShader)); composer.addPass(new OutputPass())
+  }
+  sizeComposer(); dirty = 3
+}
+function sizeComposer() { renderer.setSize(innerWidth, innerHeight, false); if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(innerWidth, innerHeight) } }
+function draw() { if (composer) composer.render(); else renderer.render(scene, camera) }
+// auto-downgrade: if active frames stay slow, drop one tier (never upgrades back automatically)
+const perf = []
+function perfSample(ms, dt) {
+  if (pinned || document.hidden) return
+  perf.push(Math.max(ms, Math.min(dt * 1000, 200))); if (perf.length < 45) return
+  const m = perf.sort((a, b) => a - b)[22]; perf.length = 0
+  if (m > 40 && tier !== 'low') { tier = TIERS[TIERS.indexOf(tier) - 1]; setupTier() }
+}
+setupTier()
 function resize() {
-  renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight
+  sizeComposer(); camera.aspect = innerWidth / innerHeight
   camera.fov = innerWidth / innerHeight < 0.8 ? 46 : 36
   applyViewOffset(); camera.updateProjectionMatrix(); if (mode === 'shelf' && auto) goCam(camShelfGoal()); dirty = 3
 }
@@ -614,7 +700,7 @@ function renderSlotThumbs() {
 function pickFile(k) { cropKey = k; $('fileIn').click() }
 $('fileIn').onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = ''; if (!f || !cropKey) return
-  toast(t('processing')); const blob = await downscale(f, cropKey === 'spine' ? 1800 : 1600)
+  toast(t('processing')); const blob = await downscale(f, cropKey === 'disc' ? 2048 : 2560)
   draft.slots[cropKey] = { blob, crop: { x: 0, y: 0, s: 1 } }; draftImgs[cropKey] = await blobToImage(blob)
   rebuildDraft(); renderSlots(); openCrop(cropKey)
 }
@@ -655,10 +741,10 @@ async function applyLookup(r, picked) {
   if (r.cover && !draft.slots.front?.blob) {
     toast(t('processing')); const raw = await fetchImageBlob(r.cover)
     if (raw) {
-      const blob = await downscale(raw, 1600), img = await blobToImage(blob)
+      const blob = (await prepareRetail(raw)) || (await downscale(raw, 2560)), img = await blobToImage(blob)
       // package scans (portrait, already carry platform branding) → no generated band/badge, trim the scan border
       const scan = img && img.height / img.width > 1.2 && /cdjapan/.test(r.cover || '')
-      draft.slots.front = { blob, crop: { x: 0, y: 0, s: scan ? 1.04 : 1 }, auto: true }; draftImgs.front = img
+      draft.slots.front = { blob, crop: { x: 0, y: 0, s: 1 }, auto: true }; draftImgs.front = img
       // retail art already carries its platform band/logo → generated overlay off by default (user can re-enable)
       if (!draft.bandUser) { draft.band = false; $('fBand').checked = false }
       filled.push('cover')
@@ -793,7 +879,7 @@ async function boot() {
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  window.__sc = { tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 boot()

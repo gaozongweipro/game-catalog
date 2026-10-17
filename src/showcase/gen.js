@@ -91,16 +91,69 @@ function nsFrontDeco(g, w, h, platform, keyCard) {
 }
 export const BLEED = 18 // px of the template that hides under the case lip
 export function canvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c }
+// Print canvases are rendered at PRINT_SCALE× their template size; width/height stay in template units so all
+// layout code (and consumers that read .width/.height for aspect) is unchanged while the bitmap is sharper.
+const lowGPU = typeof navigator !== 'undefined' && (/Mobi|Android|iPhone|iPad/.test(navigator.userAgent) || (navigator.hardwareConcurrency || 8) <= 4)
+export const PRINT_SCALE = lowGPU ? 1.5 : 2
+export function hcanvas(w, h, S = PRINT_SCALE) {
+  const c = canvas(Math.round(w * S), Math.round(h * S)), g = c.getContext('2d')
+  g.scale(S, S); g.imageSmoothingQuality = 'high'
+  Object.defineProperty(c, 'width', { value: w, configurable: true }); Object.defineProperty(c, 'height', { value: h, configurable: true })
+  return c
+}
+/** Real bitmap size of a (possibly hi-res) print canvas. */
+export const bitmapSize = (c) => { const d = Object.getPrototypeOf(c); const gw = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width').get; return [gw.call(c), Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height').get.call(c)] }
 
 /** Downscale an uploaded File to a JPEG blob (max edge `max`). */
-export async function downscale(file, max = 1600) {
+export async function downscale(file, max = 2560) {
   const bmp = await createImageBitmap(file).catch(() => null)
   let src = bmp
   if (!src) src = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file) })
-  const s = Math.min(1, max / Math.max(src.width, src.height))
-  const c = canvas(Math.round(src.width * s), Math.round(src.height * s))
-  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height)
-  return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.88))
+  const c = resample(src, Math.min(1, max / Math.max(src.width, src.height)))
+  return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.93))
+}
+/** High-quality resample: halve step by step when shrinking (no aliasing), smooth 'high' when enlarging. */
+export function resample(src, s) {
+  let cur = src, w = src.width, h = src.height
+  const tw = Math.max(1, Math.round(w * s)), th = Math.max(1, Math.round(h * s))
+  while (w / 2 >= tw) { const c = canvas(Math.round(w / 2), Math.round(h / 2)), g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(cur, 0, 0, c.width, c.height); cur = c; w = c.width; h = c.height }
+  const c = canvas(tw, th), g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(cur, 0, 0, tw, th); return c
+}
+/** Unsharp mask (amount 0..1) for upscaled low-res retail photos. */
+export function sharpen(c, amount = 0.45) {
+  const g = c.getContext('2d'), { width: w, height: h } = c, src = g.getImageData(0, 0, w, h), d = src.data, o = new Uint8ClampedArray(d)
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = (y * w + x) * 4
+    for (let k = 0; k < 3; k++) { const b = (d[i - 4 + k] + d[i + 4 + k] + d[i - w * 4 + k] + d[i + w * 4 + k]) / 4; o[i + k] = d[i + k] + (d[i + k] - b) * amount * 2 } }
+  src.data.set(o); g.putImageData(src, 0, 0); return c
+}
+/** Retail photo cleanup: strip uniform light background, then the plastic case rim (blue/red/clear band). */
+export function trimRetail(img) {
+  const w = img.width, h = img.height, c0 = canvas(w, h), g0 = c0.getContext('2d'); g0.drawImage(img, 0, 0)
+  const d = g0.getImageData(0, 0, w, h).data
+  const line = (axis, k) => { // stats over the central 60% of a row (axis 0) or column (axis 1)
+    const n = axis ? h : w, a = Math.floor(n * 0.2), b = Math.ceil(n * 0.8); let sr = 0, sg = 0, sb = 0, s2 = 0, m = 0
+    for (let t = a; t < b; t++) { const i = (axis ? t * w + k : k * w + t) * 4, L = d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11; sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; s2 += L * L; m++ }
+    const r = sr / m, gg = sg / m, bb = sb / m, L = r * 0.3 + gg * 0.59 + bb * 0.11; return { c: [r, gg, bb], L, sd: Math.sqrt(Math.max(0, s2 / m - L * L)) }
+  }
+  const edge = (axis, from, dir, n) => {
+    let k = from, steps = 0; const lim = Math.floor(n * 0.08)
+    while (steps < lim) { const s = line(axis, k); if (!(s.L > 228 && s.sd < 14)) break; k += dir; steps++ } // background
+    const first = line(axis, k); let rim = 0
+    while (rim < Math.floor(n * 0.035)) { const s = line(axis, k); const dc = Math.hypot(s.c[0] - first.c[0], s.c[1] - first.c[1], s.c[2] - first.c[2]); if (s.sd > 22 || dc > 45) break; k += dir; rim++ } // case rim
+    if (rim < 2) k -= dir * rim // no rim found → keep content
+    return k + dir * Math.round(n * 0.004)
+  }
+  const top = edge(0, 0, 1, h), bot = edge(0, h - 1, -1, h), left = edge(1, 0, 1, w), right = edge(1, w - 1, -1, w)
+  const cw = right - left + 1, ch = bot - top + 1
+  if (cw < w * 0.6 || ch < h * 0.6) return c0
+  const c = canvas(cw, ch); c.getContext('2d').drawImage(c0, left, top, cw, ch, 0, 0, cw, ch); return c
+}
+/** Retail/lookup image → clean, sharp working image (trim, upscale small sources to ≥1800 px with sharpening). */
+export async function prepareRetail(blob) {
+  const img = await blobToImage(blob); if (!img) return null
+  let c = trimRetail(img); const long = Math.max(c.width, c.height)
+  if (long < 1800) { c = resample(c, Math.min(4, 1800 / long)); sharpen(c, long < 700 ? 0.55 : 0.35) }
+  return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.94))
 }
 export function blobToImage(blob) {
   return new Promise((res) => { if (!blob) return res(null); const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = URL.createObjectURL(blob) })
@@ -132,7 +185,7 @@ function fitFont(g, text, maxW, size, weight = 800, fam = '"Noto Sans SC","PingF
 
 export function genFront(img, crop, title, band = true, platform = 'ps5', keyCard = false) {
   const T = templatesFor(platform).front
-  const c = canvas(T.w, T.h), g = c.getContext('2d')
+  const c = hcanvas(T.w, T.h), g = c.getContext('2d')
   g.fillStyle = '#1b1d22'; g.fillRect(0, 0, c.width, c.height)
   if (img) drawCropped(g, img, c.width, c.height, crop)
   else placeholderArt(g, c.width, c.height, title)
@@ -140,7 +193,7 @@ export function genFront(img, crop, title, band = true, platform = 'ps5', keyCar
   return c
 }
 function nsSpine(img, crop, title, color, band, platform) {
-  const T = NS_TPL.spine, c = canvas(T.w, T.h), g = c.getContext('2d'), two = platform === 'ns2'
+  const T = NS_TPL.spine, c = hcanvas(T.w, T.h), g = c.getContext('2d'), two = platform === 'ns2'
   if (img) drawCropped(g, img, c.width, c.height, crop)
   else {
     if (two) { const col = color || [40, 46, 56]; const gr = g.createLinearGradient(0, 0, 0, c.height); gr.addColorStop(0, rgb(col)); gr.addColorStop(1, rgb(col.map((v) => v * 0.55))); g.fillStyle = gr } else g.fillStyle = NS_RED
@@ -158,7 +211,7 @@ function nsSpine(img, crop, title, color, band, platform) {
 }
 export function genSpine(img, crop, title, color, band = true, platform = 'ps5') {
   if (platform !== 'ps5') return nsSpine(img, crop, title, color, band, platform)
-  const c = canvas(SPINE_W, FRONT_H), g = c.getContext('2d')
+  const c = hcanvas(SPINE_W, FRONT_H), g = c.getContext('2d')
   if (img) { drawCropped(g, img, c.width, c.height, crop) }
   else {
     const col = color || [40, 46, 56]
@@ -172,7 +225,7 @@ export function genSpine(img, crop, title, color, band = true, platform = 'ps5')
 }
 export function genBack(img, crop, cover, title, color, band = true, platform = 'ps5') {
   if (platform !== 'ps5') return nsBack(img, crop, cover, title, color, band, platform)
-  const c = canvas(FRONT_W, FRONT_H), g = c.getContext('2d')
+  const c = hcanvas(FRONT_W, FRONT_H), g = c.getContext('2d')
   if (img) { drawCropped(g, img, c.width, c.height, crop); if (band) banner(g, c.width); return c }
   const col = color || [30, 34, 40]
   g.fillStyle = rgb(col.map((v) => v * 0.5)); g.fillRect(0, 0, c.width, c.height)
@@ -196,7 +249,7 @@ export function genBack(img, crop, cover, title, color, band = true, platform = 
   return c
 }
 function nsBack(img, crop, cover, title, color, band, platform) {
-  const T = NS_TPL.back, c = canvas(T.w, T.h), g = c.getContext('2d'), two = platform === 'ns2'
+  const T = NS_TPL.back, c = hcanvas(T.w, T.h), g = c.getContext('2d'), two = platform === 'ns2'
   const bh = band && two ? NS2_BAND : 0, F = two && band ? NS2_FRAME : 0
   const deco = () => { if (!band) return; g.fillStyle = NS_RED; g.fillRect(0, 0, c.width, bh); if (two) { g.fillRect(0, 0, F, c.height); g.fillRect(c.width - F, 0, F, c.height); g.fillRect(0, c.height - F, c.width, F) } const lh = bh * 0.5; if (two) ns2Logo(g, c.width / 2, bh * 0.12, bh * 0.46); else nsLogo(g, c.width - 290, 40, 56, false, NS_RED) }
   if (img) { drawCropped(g, img, c.width, c.height, crop); deco(); return c }
@@ -218,7 +271,7 @@ function nsBack(img, crop, cover, title, color, band, platform) {
   deco(); return c
 }
 function nsLabel(img, crop, cover, title, platform, keyCard) {
-  const c = canvas(LBW, LBH), g = c.getContext('2d')
+  const c = hcanvas(LBW, LBH), g = c.getContext('2d')
   g.fillStyle = '#222'; g.fillRect(0, 0, LBW, LBH)
   if (img) drawCropped(g, img, LBW, LBH, crop)
   else if (cover) drawCropped(g, cover, LBW, LBH, { s: 1.0, y: 0.1 })
@@ -228,7 +281,7 @@ function nsLabel(img, crop, cover, title, platform, keyCard) {
 }
 export function genInner(img, crop, cover, color, platform = 'ps5') {
   const T = templatesFor(platform).inner
-  const c = canvas(T.w, T.h), g = c.getContext('2d')
+  const c = hcanvas(T.w, T.h), g = c.getContext('2d')
   if (img) { drawCropped(g, img, c.width, c.height, crop); return c }
   const col = color || [20, 24, 30]; g.fillStyle = rgb(col.map((v) => v * 0.45)); g.fillRect(0, 0, c.width, c.height)
   if (cover) { g.save(); g.filter = 'blur(40px)'; g.globalAlpha = 0.35; drawCropped(g, cover, c.width, c.height, { s: 1.6 }); g.restore() }
@@ -236,7 +289,7 @@ export function genInner(img, crop, cover, color, platform = 'ps5') {
 }
 export function genDisc(img, crop, cover, title, band = true, platform = 'ps5', keyCard = false) {
   if (platform !== 'ps5') return nsLabel(img, crop, cover, title, platform, keyCard)
-  const s = 1024, c = canvas(s, s), g = c.getContext('2d')
+  const s = 1024, c = hcanvas(s, s), g = c.getContext('2d')
   g.fillStyle = '#ddd'; g.fillRect(0, 0, s, s)
   if (img) drawCropped(g, img, s, s, crop)
   else if (cover) { drawCropped(g, cover, s, s, { s: 1.15, y: -0.1 }); g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(0, 0, s, s) }

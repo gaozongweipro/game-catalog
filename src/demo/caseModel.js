@@ -377,11 +377,13 @@ function updateWrap() {
   _fm[1].copy(spineG.matrix); _fm[2].multiplyMatrices(spineG.matrix, coverHinge.matrix)
   updateRibbon(wrapIns); updateRibbon(wrapInner); updateRibbon(sleeve); hingeSkins.forEach(updateRibbon)
 }
+// outer print resolution: 2× on capable GPUs (≈5k px wrap), capped by the GPU's max texture size
+const WRAP_RES = Math.min(mobile ? 1.5 : 2, renderer.capabilities.maxTextureSize / ((W * 2 + D + 0.1) * PX))
 function wrapTex(art) {
   const { pts, total } = wrapIns.userData
   const sA = pts[4].s, sB = pts[pts.length - 5].s // crease-A start, crease-B end
-  const P = PX, Wc = Math.round(total * P), Hc = FRONT_H
-  const [c, g] = ctx(Wc, Hc)
+  const P = PX * WRAP_RES, Wc = Math.round(total * P), Hc = Math.round(FRONT_H * WRAP_RES)
+  const [c, g] = ctx(Wc, Hc); g.imageSmoothingQuality = 'high'
   g.fillStyle = '#222'; g.fillRect(0, 0, Wc, Hc)
   if (art.back) g.drawImage(art.back, 0, 0, Math.round(sA * P), Hc)
   if (art.spine) g.drawImage(art.spine, Math.round(sA * P), 0, Math.round((sB - sA) * P), Hc)
