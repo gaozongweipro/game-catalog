@@ -11,7 +11,7 @@
 <canvas id="c"></canvas>
 <header class="bar">
   <a id="back" class="pill" href="./">←</a>
-  <div class="brand"><b id="brandT">陈列柜</b><span id="brandS">我的电子实体版</span></div>
+  <div class="brand chip" id="brand" data-tone="light"><b id="brandT">陈列柜</b><span id="brandS">我的电子实体版</span></div>
   <div class="tools">
     <div class="seg" id="viewSeg" role="group"><button data-v="spine" aria-pressed="true" id="vSpine">书脊</button><button data-v="front" aria-pressed="false" id="vFront">正面</button></div>
     <button class="pill icon" id="envBtn" aria-label="environment" data-ic="gear"></button>
@@ -43,7 +43,7 @@
 <div class="empty hidden" id="empty"><div class="card"><div class="glyph">▢</div><h2 id="emptyH">展柜还是空的</h2><p id="emptyP">上传封面，制作你的第一张电子实体版</p><button class="primary" id="emptyBtn">开始制作</button></div></div>
 
 <section class="inspect hidden" id="inspect">
-  <div class="ihead"><h2 id="iTitle"></h2><p id="iSub"></p></div>
+  <div class="ihead chip" id="ihead" data-tone="light"><h2 id="iTitle"></h2><p id="iSub"></p></div>
   <nav class="tb ibar" id="ibar" aria-label="inspect toolbar">
     <button id="iBack" class="tbtn" data-ic="back"><span id="iBackT">返回</span></button>
     <button id="iOpen" class="tbtn" data-ic="open"><span>打开</span></button>
@@ -66,31 +66,47 @@
   <div class="envf"><button class="tbtn" id="envReset" data-ic="reset"><span id="envResetT">恢复预设</span></button></div>
 </section>
 
-<section class="editor hidden" id="editor" aria-label="editor">
+<section class="editor hidden" id="editor" aria-label="editor" aria-modal="false">
   <div class="grab"></div>
-  <div class="ehead"><h2 id="eTitleH">制作电子实体版</h2><button class="ghost" id="eCancel">取消</button><button class="primary" id="eSave">保存</button></div>
+  <header class="ehead">
+    <div class="eh-t"><h2 id="eTitleH">制作电子实体版</h2><p id="eSubH">实时 3D 预览 · 所有字段均可选</p></div>
+    <button class="ibtn" id="eClose" aria-label="close" data-ic="x"></button>
+  </header>
   <div class="ebody" id="ebody">
-    <label class="field"><span id="lTitle">游戏名称</span><input id="fTitle" maxlength="80" autocomplete="off" placeholder="中 / 日 / 英文游戏名，可选" /></label>
-    <div class="sugg hidden" id="sugg"></div>
-    <div class="row">
+    <section class="egroup">
+      <label class="field" for="fTitle"><span class="glabel" id="lTitle">游戏名称</span>
+        <span class="inp"><i data-ic="search"></i><input id="fTitle" maxlength="80" autocomplete="off" enterkeyhint="search" placeholder="中 / 日 / 英文游戏名，可选" /></span></label>
+      <div class="sugg hidden" id="sugg"></div>
+    </section>
+    <section class="egroup">
+      <span class="glabel" id="gPlat">平台</span>
       <div class="seg plat" id="platSeg"><button aria-pressed="true" data-p="ps5">PS5</button><button aria-pressed="false" data-p="ns">Switch</button><button aria-pressed="false" data-p="ns2">Switch 2</button></div>
-      <label class="switch"><input type="checkbox" id="fBand" checked /><span id="lBand">PS5 顶条</span></label>
-      <label class="switch hidden" id="keyWrap"><input type="checkbox" id="fKey" /><span id="lKey">Game-Key Card</span></label>
-    </div>
-    <p class="note" id="platNote"></p>
-    <div class="slots" id="slots"></div>
-    <p class="note" id="slotNote">只需上传正面封面，其余会自动生成；点卡片可上传或裁切。</p>
+      <p class="note" id="platNote"></p>
+      <div class="toggles">
+        <label class="tgl"><span id="lBand">PS5 顶条</span><input type="checkbox" role="switch" id="fBand" checked /></label>
+        <label class="tgl hidden" id="keyWrap"><span id="lKey">Game-Key Card</span><input type="checkbox" role="switch" id="fKey" /></label>
+      </div>
+    </section>
+    <section class="egroup">
+      <span class="glabel" id="gArt">封面与印刷</span>
+      <div class="slots" id="slots"></div>
+      <p class="note" id="slotNote">只需上传正面封面，其余会自动生成；点卡片可上传或裁切。</p>
+    </section>
   </div>
-  <div class="crop hidden" id="crop">
-    <div class="chead"><b id="cTitle"></b><span id="cHint">拖动移动 · 双指或滚轮缩放</span></div>
+  <footer class="efoot"><button class="btn sec" id="eCancel">取消</button><button class="btn pri" id="eSave">保存</button></footer>
+  <div class="crop hidden" id="crop" role="dialog" aria-labelledby="cTitle">
+    <header class="ehead chead"><button class="ibtn" id="cBack" aria-label="back" data-ic="back"></button><div class="eh-t"><h2 id="cTitle"></h2><p id="cHint">拖动移动 · 双指或滚轮缩放</p></div></header>
     <div class="cwrap" id="cwrap"><canvas id="cc"></canvas></div>
-    <div class="cctl">
-      <input type="range" id="cZoom" min="1" max="4" step="0.01" value="1" />
-      <button class="ghost" id="cReset">重置</button><button class="ghost" id="cReplace">换图</button><button class="ghost" id="cRemove">移除</button><button class="primary" id="cDone">完成</button>
-    </div>
+    <footer class="cfoot">
+      <div class="zoom"><button class="ibtn sm" id="cZoomOut" aria-label="zoom out" data-ic="minus"></button><input type="range" id="cZoom" min="1" max="4" step="0.01" value="1" aria-label="zoom" /><button class="ibtn sm" id="cZoomIn" aria-label="zoom in" data-ic="plus"></button></div>
+      <div class="cact">
+        <button class="btn sec" id="cReset" data-ic="reset"><span class="lbl">重置</span></button><button class="btn sec" id="cReplace" data-ic="upload"><span class="lbl">换图</span></button><button class="btn sec danger" id="cRemove" data-ic="trash"><span class="lbl">移除</span></button><button class="btn pri" id="cDone" data-ic="check"><span class="lbl">完成</span></button>
+      </div>
+    </footer>
   </div>
   <input type="file" id="fileIn" accept="image/*" hidden />
 </section>
+<div class="dlg-scrim hidden" id="dlg"><div class="dlg" role="alertdialog" aria-modal="true" aria-labelledby="dlgH" aria-describedby="dlgP"><div class="dlg-ic" id="dlgIc"></div><h3 id="dlgH"></h3><p id="dlgP"></p><div class="dlg-act"><button class="btn sec" id="dlgNo"></button><button class="btn pri" id="dlgYes"></button></div></div></div>
 <div class="toast hidden" id="toast"></div>
 <script type="module" src="/src/showcase/main.js"></script>
 </body>

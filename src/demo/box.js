@@ -1,3 +1,4 @@
+import '../ui/tokens.css'
 import './box.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -175,6 +176,9 @@ function syncUI() {
   ui.bBrowse.textContent = discFocus ? t.exitBrowse : t.browse
   ui.bFlip.textContent = t.flip; ui.bFlip.classList.toggle('hidden', !discFocus)
   document.body.classList.toggle('disc-focus', discFocus)
+  // contextual emphasis (same rules as the showcase toolbar): one primary, one accent
+  const st = sheetT ? 'sheet' : (outTarget || discFocus || out > 0.02) ? 'disc' : openTarget ? 'open' : 'case'
+  ui.bOpen.classList.toggle('pri', st === 'case'); ui.bDisc.classList.toggle('acc', st === 'open'); ui.bDisc.classList.toggle('pri', st === 'disc'); ui.bSheet.classList.toggle('pri', st === 'sheet')
 }
 function canOpen() { return !(outTarget || out > 0.02 || discFocus || hubPressTarget || (sheetT && sheetK < 1) || (!sheetT && sheetK > 0)) }
 let sheetK = 0, sheetT = 0, rotObj = 'case', sheetDock = false, dockK = 0, pendingSheetIn = false, pendingSheetOut = false, discAway = 0

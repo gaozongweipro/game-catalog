@@ -1,3 +1,4 @@
+import '../ui/tokens.css'
 import './showcase.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -47,10 +48,12 @@ const S = {
     sample: 'Sample · my physical copy', made: 'Digital physical edition', needTitle: 'Please enter a title', needFront: 'Please upload a front cover', saved: 'Saved to the cabinet', deleted: 'Deleted', delQ: 'Delete “%s”?', exported: 'Exported', imported: 'Imported %d item(s)', badFile: 'Unrecognised file',
     sampleRO: 'The sample entry is read-only', processing: 'Processing…', guideBand: 'PS5 band', guideBleed: 'Bleed', hub: 'Hub', title: '3D Showcase · digital physical editions' },
 }
+Object.assign(S.zh, { gPlat: '平台', gArt: '封面与印刷', eSubH: '实时 3D 预览 · 所有字段均可选', dCancel: '取消', delH: '删除这件收藏？', delP: '「%s」会从展柜中移除，此操作无法撤销。', delOk: '删除', rmH: '移除这张图片？', rmP: '该位置会恢复为自动生成的图案。', rmOk: '移除', discH: '放弃未保存的修改？', discP: '关闭后，本次编辑的内容不会保存。', discOk: '放弃', discNo: '继续编辑', stAuto: '自动生成', stUp: '已上传', stWeb: '联网封面' })
+Object.assign(S.en, { gPlat: 'Platform', gArt: 'Covers & prints', eSubH: 'Live 3D preview · every field optional', dCancel: 'Cancel', delH: 'Delete this item?', delP: '“%s” will be removed from the cabinet. This can’t be undone.', delOk: 'Delete', rmH: 'Remove this image?', rmP: 'This slot goes back to generated artwork.', rmOk: 'Remove', discH: 'Discard unsaved changes?', discP: 'Closing now won’t save this edit.', discOk: 'Discard', discNo: 'Keep editing', stAuto: 'Generated', stUp: 'Uploaded', stWeb: 'Web cover' })
 const t = (k) => S[lang][k] ?? k
 function syncLang() {
   document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'; document.title = t('title')
-  for (const k of ['brandT', 'brandS', 'vSpine', 'vFront', 'makeT', 'loadT', 'emptyH', 'emptyP', 'emptyBtn', 'mExport', 'mImport', 'mLang', 'iBackT', 'iMoreT', 'tFilterT', 'tEnvT', 'iEditT', 'iLeftT', 'iRightT', 'iDelT', 'envT', 'envResetT', 'eCancel', 'eSave', 'lTitle', 'lBand', 'lKey', 'slotNote', 'cHint', 'cReset', 'cReplace', 'cRemove', 'cDone']) { const el = $(k); if (el) el.textContent = t(k) }
+  for (const k of ['brandT', 'brandS', 'vSpine', 'vFront', 'makeT', 'loadT', 'emptyH', 'emptyP', 'emptyBtn', 'mExport', 'mImport', 'mLang', 'iBackT', 'iMoreT', 'tFilterT', 'tEnvT', 'iEditT', 'iLeftT', 'iRightT', 'iDelT', 'envT', 'envResetT', 'eCancel', 'eSave', 'lTitle', 'lBand', 'lKey', 'slotNote', 'cHint', 'cReset', 'cReplace', 'cRemove', 'cDone', 'gPlat', 'gArt', 'eSubH']) { const el = $(k); if (el) (el.querySelector(':scope>.lbl') || el).textContent = t(k) }
   $('langBtn').textContent = lang === 'en' ? '中文' : 'EN'; $('back').href = BASE
   if (typeof syncViewBtn === 'function') syncViewBtn(); syncInspectUI(); if (editing) renderSlots(); if (typeof renderEnvUI === 'function') renderEnvUI()
 }
@@ -64,7 +67,7 @@ const IC = { back: '<path d="M15 18l-6-6 6-6"/>', open: '<path d="M3 5.5h6.5A2.5
   flip: '<path d="M4 10a8 8 0 0 1 14.3-3.7L20 8M20 3.5V8h-4.5"/><path d="M20 14a8 8 0 0 1-14.3 3.7L4 16M4 20.5V16h4.5"/>', reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 3.5v5h5"/>',
   more: '<circle cx="5.5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor"/>', filter: '<path d="M4 6.5h16M7 12h10M10 17.5h4"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', chevL: '<path d="M14.5 6l-6 6 6 6"/>', chevR: '<path d="M9.5 6l6 6-6 6"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', trash: '<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
-  x: '<path d="M6 6l12 12M18 6L6 18"/>', spines: '<path d="M5 4.5v15M9 4.5v15M13 4.5v15"/><path d="M16.5 5.2l3.4 14"/>', fronts: '<rect x="3.5" y="5" width="7" height="14" rx="1.2"/><rect x="13.5" y="5" width="7" height="14" rx="1.2"/>', gear: `<path d="${gearPath}"/><circle cx="12" cy="12" r="3"/>` }
+  x: '<path d="M6 6l12 12M18 6L6 18"/>', upload: '<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4.5 14.5v4a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-4"/>', crop: '<path d="M6.5 2.5v15h15"/><path d="M2.5 6.5h15v15"/>', check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>', minus: '<path d="M5 12h14"/>', alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4.5M12 17.6v.1"/>', spines: '<path d="M5 4.5v15M9 4.5v15M13 4.5v15"/><path d="M16.5 5.2l3.4 14"/>', fronts: '<rect x="3.5" y="5" width="7" height="14" rx="1.2"/><rect x="13.5" y="5" width="7" height="14" rx="1.2"/>', gear: `<path d="${gearPath}"/><circle cx="12" cy="12" r="3"/>` }
 const svg = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[k] || ''}</svg>`
 function setIcon(el, k) { if (!el || el.dataset.icNow === k) return; el.dataset.icNow = k; el.querySelector('svg')?.remove(); el.insertAdjacentHTML('afterbegin', svg(k)) }
 document.querySelectorAll('[data-ic]').forEach((el) => setIcon(el, el.dataset.ic))
@@ -578,7 +581,8 @@ function reseat() { rot.reset(); discFocus = false; flipT = 0; outT = 0; reseati
 function inspectState() { if (sheetK > 0 && !sheetDock) return 'cover'; if (outT || discFocus || out > 0.02) return 'disc'; if (openT || open > 0.5) return 'open'; return 'case' }
 function syncInspectUI() {
   if (!sel) return
-  $('iTitle').textContent = sel.title || ''; $('iSub').textContent = sel.sample ? t('sample') : `${{ ps5: 'PS5', ns: 'Nintendo Switch', ns2: 'Nintendo Switch 2' }[sel.platform || 'ps5']}${sel.keyCard && sel.platform === 'ns2' ? ' · Game-Key Card' : ''} · ${t('made')}`
+  $('iTitle').textContent = sel.title || ''
+  { const pl = sel.platform || 'ps5', sub = $('iSub'); sub.textContent = ''; const bd = document.createElement('span'); bd.className = 'badge ' + pl; bd.textContent = { ps5: 'PS5', ns: 'Switch', ns2: 'Switch 2' }[pl]; const tx = document.createElement('span'); tx.textContent = sel.sample ? t('sample') : `${sel.keyCard && pl === 'ns2' ? 'Game-Key Card · ' : ''}${t('made')}`; sub.append(bd, tx) }
   const st = inspectState(), cart = model.kind === 'cart', sheetBusy = (sheetT && sheetK < 1) || (!sheetT && sheetK > 0) || pendingSheetOut
   const openBusy = !!(outT || out > 0.02 || hubT || (sheetT && sheetK < 1 && !sheetDock) || (!sheetT && sheetK > 0))
   tbSet('iOpen', { label: openT ? t('close') : t('open'), ic: openT ? 'close' : 'open', kind: st === 'case' ? 'pri' : '', show: st === 'case' || st === 'open', dis: openBusy })
@@ -735,7 +739,37 @@ function setupTier() {
   sizeComposer(); dirty = 3
 }
 function sizeComposer() { renderer.setSize(innerWidth, innerHeight, false); if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(innerWidth, innerHeight) } }
-function draw() { if (composer) composer.render(); else renderer.render(scene, camera) }
+function draw() { if (composer) composer.render(); else renderer.render(scene, camera); sampleTone() }
+// ---- adaptive title chips: read the rendered pixels behind each chip (same frame, before the buffer is presented),
+// composite the chip surface over them and pick the tone (dark text on light chip / light text on dark chip) with the
+// higher WCAG contrast. Throttled; a trailing sample runs once motion stops.
+const TONES = { light: { c: [250, 248, 244], a: 0.78, ink: [31, 42, 40], mut: [70, 82, 79], mix: 0.84 }, dark: { c: [27, 25, 23], a: 0.8, ink: [247, 243, 236], mut: [221, 214, 203], mix: 0.82 } }
+const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
+const relL = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+const wcag = (a, b) => { const x = relL(a), y = relL(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
+let toneAt = 0, toneForce = true, toneTimer = 0, tonePx = null
+function sampleTone() {
+  const now = performance.now(); if (!toneForce && now - toneAt < 450) { clearTimeout(toneTimer); toneTimer = setTimeout(() => { toneForce = true; dirty = Math.max(dirty, 1) }, 500); return }
+  toneAt = now; toneForce = false; const gl = renderer.getContext(), pr = renderer.getPixelRatio(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight
+  const tint = new THREE.Color(PRESETS[env.preset].tint), tc = [tint.r * 255, tint.g * 255, tint.b * 255], out = {}
+  for (const el of [$('ihead'), $('brand')]) {
+    if (el.id === 'ihead' && mode !== 'inspect') continue
+    const r = el.getBoundingClientRect(); if (r.width < 4) continue
+    const x = Math.max(0, Math.floor(r.left * pr)), y = Math.max(0, Math.floor(H - r.bottom * pr)), w = Math.min(Math.ceil(r.width * pr), W - x), h = Math.min(Math.ceil(r.height * pr), H - y); if (w < 1 || h < 1) continue
+    const n = w * h * 4; if (!tonePx || tonePx.length < n) tonePx = new Uint8Array(n)
+    gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, tonePx)
+    let R = 0, G = 0, B = 0, c = 0, lo = 1, hi = 0; const st = Math.max(1, Math.floor((w * h) / 4000))
+    for (let i = 0; i < w * h; i += st) { const o = i * 4, l = relL([tonePx[o], tonePx[o + 1], tonePx[o + 2]]); R += tonePx[o]; G += tonePx[o + 1]; B += tonePx[o + 2]; c++; if (l < lo) lo = l; if (l > hi) hi = l }
+    const bg = [R / c, G / c, B / c], res = {}
+    for (const [k, T] of Object.entries(TONES)) { const chip = T.c.map((v, i) => v * T.mix + tc[i] * (1 - T.mix)), comp = chip.map((v, i) => v * T.a + bg[i] * (1 - T.a)); res[k] = { title: +wcag(T.ink, comp).toFixed(2), sub: +wcag(T.mut, comp).toFixed(2) } }
+    out[el.id] = { bgL: +relL(bg).toFixed(3), ...res }
+  }
+  // one tone for both chips (consistent look): maximise the worst-case subtitle contrast, with hysteresis
+  const ks = Object.keys(out); if (!ks.length) return
+  const worst = (k) => Math.min(...ks.map((id) => out[id][k].sub)), cur = $('brand').dataset.tone || 'light', alt = cur === 'light' ? 'dark' : 'light'
+  const pick = worst(alt) > worst(cur) * 1.08 ? alt : cur; $('brand').dataset.tone = $('ihead').dataset.tone = pick; out.tone = pick
+  window.__tone = out
+}
 // While the user turns an item (and while it settles): skip GTAO, freeze the shadow map, and if frames are still slow
 // drop the composer to 1× resolution. Everything is restored ~0.25 s after the item comes to rest.
 let lodOn = false, lodIdle = 0, lodSlow = 0, lodDpr = false
@@ -768,7 +802,7 @@ function applyViewOffset() {
   const ed = mode === 'editor' ? $('editor') : null
   if (!ed) { camera.clearViewOffset(); return }
   const r = ed.getBoundingClientRect(), w = innerWidth, h = innerHeight
-  if (innerWidth >= 900) camera.setViewOffset(w, h, r.width / 2, 0, w, h)
+  if (innerWidth >= 900) camera.setViewOffset(w, h, (w - r.left) / 2, 0, w, h)
   else camera.setViewOffset(w, h, 0, r.height / 2, w, h)
   camera.updateProjectionMatrix()
 }
@@ -819,8 +853,20 @@ $('iSheet').onclick = () => {
 }
 $('iReset').onclick = () => { rot.reset(); dirty = 3 }
 $('iBack').onclick = () => backToShelf()
+/** Styled confirm dialog (replaces window.confirm). Resolves true / false. */
+function ask({ h, p, ok, no = t('dCancel'), danger = false, ic = danger ? 'trash' : 'alert' }) {
+  const d = $('dlg'), box = d.firstElementChild; $('dlgH').textContent = h; $('dlgP').textContent = p; $('dlgYes').textContent = ok; $('dlgNo').textContent = no
+  box.classList.toggle('is-danger', danger); $('dlgYes').classList.toggle('del', danger); const ici = $('dlgIc'); delete ici.dataset.icNow; setIcon(ici, ic)
+  d.classList.remove('hidden'); const prev = document.activeElement; setTimeout(() => $('dlgNo').focus(), 30)
+  return new Promise((res) => {
+    const done = (v) => { d.classList.add('hidden'); d.onclick = $('dlgYes').onclick = $('dlgNo').onclick = null; removeEventListener('keydown', key, true); prev?.focus?.(); res(v) }
+    const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(false) } }
+    addEventListener('keydown', key, true)
+    $('dlgYes').onclick = () => done(true); $('dlgNo').onclick = () => done(false); d.onclick = (e) => { if (e.target === d) done(false) }
+  })
+}
 $('iDel').onclick = async () => {
-  closeMenus(); if (!confirm(t('delQ').replace('%s', sel.title))) return
+  closeMenus(); if (!(await ask({ h: t('delH'), p: t('delP').replace('%s', sel.title || t('untitled')), ok: t('delOk'), danger: true }))) return
   const id = sel.id; await db.del(id); artCache.delete(id); holder.visible = false; model.disc.visible = false; outT = out = 0; openT = open = 0; hubT = hubP = 0; discFocus = false
   entries = entries.filter((e) => e.id !== id); await renumber(); sel = null; doorTarget = 0; setMode('shelf'); await syncShelf(); goCam(camShelfGoal()); toast(t('deleted'))
 }
@@ -832,10 +878,10 @@ async function move(dir) {
 $('iLeft').onclick = () => move(-1); $('iRight').onclick = () => move(1)
 $('iEdit').onclick = () => { closeMenus(); if (sel.sample) return toast(t('sampleRO')); openEditor(sel) }
 $('makeBtn').onclick = () => openEditor(null); $('emptyBtn').onclick = () => openEditor(null)
-addEventListener('keydown', (e) => { if (mode === 'shelf' && document.activeElement?.tagName !== 'INPUT') { if (e.key === 'ArrowRight') goPage(page + 1); if (e.key === 'ArrowLeft') goPage(page - 1) } if (e.key === 'Escape') { if (mode === 'editor') closeEditor(false); else if (mode === 'inspect') { if (discFocus) reseat(); else backToShelf() } } })
+addEventListener('keydown', (e) => { if (mode === 'shelf' && document.activeElement?.tagName !== 'INPUT') { if (e.key === 'ArrowRight') goPage(page + 1); if (e.key === 'ArrowLeft') goPage(page - 1) } if (e.key === 'Escape' && $('dlg').classList.contains('hidden')) { if (mode === 'editor') { if (!$('crop').classList.contains('hidden')) $('cDone').onclick(); else cancelEditor() } else if (mode === 'inspect') { if (discFocus) reseat(); else backToShelf() } } })
 
 // ---------------- editor ----------------
-let editing = null, draft = null, draftImgs = {}, draftArt = null, cropKey = null, artTimer = 0, prevSel = null, prevMode = null
+let draftDirty = false, editing = null, draft = null, draftImgs = {}, draftArt = null, cropKey = null, artTimer = 0, prevSel = null, prevMode = null
 const SLOT_KEYS = ['front', 'spine', 'back', 'inner', 'disc']
 const TPL = () => templatesFor(draft?.platform)
 function syncPlat() {
@@ -844,17 +890,17 @@ function syncPlat() {
   $('keyWrap').classList.toggle('hidden', p !== 'ns2'); $('fKey').checked = !!draft.keyCard
   $('platNote').textContent = t('pn_' + p)
 }
-$('platSeg').onclick = (e) => { const p = e.target.dataset?.p; if (!p || !draft || p === draft.platform) return; draft.platUser = true; setPlatform(p) }
+$('platSeg').onclick = (e) => { const p = e.target.dataset?.p; if (!p || !draft || p === draft.platform) return; draftDirty = true; draft.platUser = true; setPlatform(p) }
 function setPlatform(p) {
   draft.platform = p; if (p !== 'ns2') draft.keyCard = false
   for (const k of SLOT_KEYS) if (draft.slots[k]?.crop) draft.slots[k].crop = { x: 0, y: 0, s: 1 } // aspect changed → reset framing
   const vis = model.disc.visible; useModel(p); model.disc.visible = vis
   holder.position.copy(INS).sub(new THREE.Vector3(0, Hm() / 2, 0)); open = openT = hubP = hubT = out = outT = 0; discFocus = false; model.pose(0, 0)
-  syncPlat(); rebuildDraft(); renderSlots(); $('crop').classList.add('hidden')
+  syncPlat(); rebuildDraft(); renderSlots(); $('crop').classList.add('hidden'); if (mode === 'editor') goCam(editorCam())
 }
 $('fKey').onchange = () => { draft.keyCard = $('fKey').checked; scheduleArt() }
 function openEditor(entry) {
-  closeMenus(); prevMode = mode; prevSel = sel
+  closeMenus(); draftDirty = false; prevMode = mode; prevSel = sel
   editing = entry || { id: null }
   draft = entry ? JSON.parse(JSON.stringify({ ...entry, slots: Object.fromEntries(Object.entries(entry.slots || {}).map(([k, v]) => [k, { crop: v.crop }])) })) : { title: '', platform: 'ps5', band: true, slots: {} }
   if (entry) for (const k of SLOT_KEYS) if (entry.slots?.[k]?.blob) draft.slots[k].blob = entry.slots[k].blob
@@ -871,7 +917,14 @@ function openEditor(entry) {
   Promise.all(SLOT_KEYS.map(async (k) => (draftImgs[k] = await blobToImage(draft.slots[k]?.blob)))).then(() => { rebuildDraft(); renderSlots() })
   renderSlots(); requestAnimationFrame(() => { applyViewOffset(); goCam(editorCam()) })
 }
-function editorCam() { inspectPose(); const d = innerWidth >= 900 ? 4.4 : 5.6; return { p: INS.clone().add(new THREE.Vector3(1.6, 0.5, d)), t: INS.clone() } }
+// live preview: fit the case to ~64 % of the visible area (left of the side panel / above the sheet) at a 3/4 angle
+function editorCam() {
+  inspectPose(); const r = $('editor').getBoundingClientRect(), desk = innerWidth >= 900
+  const visH = desk ? innerHeight : Math.max(160, r.top), visW = desk ? innerWidth - (innerWidth - r.left) : innerWidth
+  const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2), fH = (visH / innerHeight) * 0.64, fW = (visW / innerWidth) * 0.5
+  const dH = Hm() / (2 * tan * fH), dW = 1.35 / (2 * tan * camera.aspect * fW), d = THREE.MathUtils.clamp(Math.max(dH, dW), 2.6, 9)
+  const dir = new THREE.Vector3(0.3, 0.08, 1).normalize(); return { p: INS.clone().addScaledVector(dir, d), t: INS.clone() }
+}
 function rebuildDraft() {
   draft.title = $('fTitle').value.trim(); draft.band = $('fBand').checked
   draftArt = buildArt(draft, draftImgs); model.setArt(draftArt); dirty = 3
@@ -880,8 +933,9 @@ function scheduleArt() { if (artTimer) return; artTimer = setTimeout(() => { art
 function renderSlots() {
   const box = $('slots'); box.innerHTML = ''
   for (const k of SLOT_KEYS) {
-    const has = !!draft.slots[k]?.blob, el = document.createElement('button'); el.className = 'slot' + (has ? ' up' : ''); el.dataset.k = k
-    el.innerHTML = `<div class="th">${has || draftArt ? '' : '＋'}</div><b>${TPL()[k].label[lang === 'en' ? 1 : 0]}</b><i>${has ? (draft.slots[k].auto ? t('lkWeb') : t('uploaded')) : t('auto')}</i>`
+    const has = !!draft.slots[k]?.blob, web = has && draft.slots[k].auto, el = document.createElement('button'); el.className = 'slot' + (has ? ' up' : '') + (web ? ' web' : '') + (TPL()[k].rect ? ' rect' : ''); el.dataset.k = k
+    const lb = TPL()[k].label[lang === 'en' ? 1 : 0]; el.setAttribute('aria-label', lb)
+    el.innerHTML = `<div class="th"><span class="up">${svg(has ? 'crop' : 'upload')}</span></div><b>${lb}</b><i>${has ? (web ? t('stWeb') : t('stUp')) : t('stAuto')}</i>`
     el.onclick = () => { if (!has) pickFile(k); else openCrop(k) }
     box.appendChild(el)
   }
@@ -892,7 +946,7 @@ function renderSlotThumbs() {
   const map = { front: draftArt.front, spine: draftArt.spine, back: draftArt.back, inner: draftArt.innerCover, disc: draftArt.disc }
   for (const el of $('slots').children) {
     const src = map[el.dataset.k], th = el.querySelector('.th'); if (!src) continue
-    let c = th.querySelector('canvas'); if (!c) { th.textContent = ''; c = document.createElement('canvas'); th.appendChild(c) }
+    let c = th.querySelector('canvas'); if (!c) { c = document.createElement('canvas'); th.prepend(c) }
     const s = 160 / Math.max(src.width, src.height); c.width = Math.max(1, Math.round(src.width * s)); c.height = Math.max(1, Math.round(src.height * s)); c.getContext('2d').drawImage(src, 0, 0, c.width, c.height)
   }
 }
@@ -900,7 +954,7 @@ function pickFile(k) { cropKey = k; $('fileIn').click() }
 $('fileIn').onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = ''; if (!f || !cropKey) return
   toast(t('processing')); const blob = await downscale(f, cropKey === 'disc' ? 2048 : 2560)
-  draft.slots[cropKey] = { blob, crop: { x: 0, y: 0, s: 1 } }; draftImgs[cropKey] = await blobToImage(blob)
+  draftDirty = true; draft.slots[cropKey] = { blob, crop: { x: 0, y: 0, s: 1 } }; draftImgs[cropKey] = await blobToImage(blob)
   rebuildDraft(); renderSlots(); openCrop(cropKey)
 }
 // ---- name lookup: catalog first, then Wikipedia/Wikidata ----
@@ -914,7 +968,7 @@ function lkRender(state) {
     const b = document.createElement('button'); b.className = 'sg'; b.dataset.i = i
     const pl = { ps5: 'PS5', ns: 'Switch', ns2: 'Switch 2' }[r.platform] || '—'
     const sub = [r.src === 'catalog' ? t('lkCat') : t('lkWeb'), pl, r.date?.slice(0, 4), r.publisher].filter(Boolean).join(' · ')
-    b.innerHTML = `<span class="sg-th">${r.cover ? `<img alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}</span><span class="sg-t"><b></b><i></i></span>`
+    b.innerHTML = `<span class="sg-th">${r.cover ? `<img alt="" loading="lazy" referrerpolicy="no-referrer">` : svg(r.platform === 'ps5' ? 'disc' : 'cart')}</span><span class="sg-t"><b></b><i></i></span>`
     b.querySelector('b').textContent = r.title; b.querySelector('i').textContent = sub
     const im = b.querySelector('img'); if (im) { im.src = r.cover; im.onerror = () => { im.onerror = null; im.src = `https://wsrv.nl/?url=${encodeURIComponent(r.cover.replace(/^https?:\/\//, ''))}&w=120` } }
     b.onclick = () => applyLookup(r, true); box.appendChild(b)
@@ -955,7 +1009,9 @@ async function applyLookup(r, picked) {
 $('fTitle').addEventListener('input', () => { clearTimeout(lkTimer); lkTimer = setTimeout(() => runLookup($('fTitle').value), 350) })
 $('fTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter' && lkResults[0]) { e.preventDefault(); applyLookup(lkResults[0], true) } })
 $('fTitle').oninput = scheduleArt; $('fBand').onchange = () => { draft.bandUser = true; scheduleArt() }
-$('eCancel').onclick = () => closeEditor(false)
+async function cancelEditor() { if (draftDirty && !(await ask({ h: t('discH'), p: t('discP'), ok: t('discOk'), no: t('discNo'), danger: true, ic: 'alert' }))) return; closeEditor(false) }
+$('eCancel').onclick = () => cancelEditor(); $('eClose').onclick = () => cancelEditor()
+$('ebody').addEventListener('input', () => { draftDirty = true }); $('ebody').addEventListener('change', () => { draftDirty = true })
 $('eSave').onclick = async () => {
   draft.title = $('fTitle').value.trim()
   // everything is optional: name-only → use the best catalog match if it is confident; otherwise a generated cover
@@ -991,7 +1047,7 @@ function openCrop(k) {
   cropKey = k; cropImg = draftImgs[k]; if (!cropImg) return pickFile(k)
   cropState = draft.slots[k].crop ||= { x: 0, y: 0, s: 1 }
   $('crop').classList.remove('hidden'); $('cTitle').textContent = TPL()[k].label[lang === 'en' ? 1 : 0]
-  $('cZoom').value = cropState.s; $('cRemove').disabled = false
+  $('cZoom').value = cropState.s; zoomFill(); $('cRemove').disabled = false
   requestAnimationFrame(drawCrop)
 }
 function drawCrop() {
@@ -1045,11 +1101,14 @@ cc.addEventListener('pointermove', (e) => {
 const endP = (e) => { cptr.delete(e.pointerId); if (cptr.size < 2) pinch0 = null }
 cc.addEventListener('pointerup', endP); cc.addEventListener('pointercancel', endP)
 cc.addEventListener('wheel', (e) => { e.preventDefault(); setZoom(cropState.s * Math.exp(-e.deltaY * 0.0015)) }, { passive: false })
-function setZoom(s) { cropState.s = THREE.MathUtils.clamp(s, 1, 4); $('cZoom').value = cropState.s; drawCrop(); scheduleArt() }
+function zoomFill() { const z = $('cZoom'); z.style.setProperty('--p', `${((z.value - 1) / 3) * 100}%`) }
+function setZoom(s) { cropState.s = THREE.MathUtils.clamp(s, 1, 4); $('cZoom').value = cropState.s; zoomFill(); draftDirty = true; drawCrop(); scheduleArt() }
 $('cZoom').oninput = (e) => setZoom(+e.target.value)
-$('cReset').onclick = () => { Object.assign(cropState, { x: 0, y: 0, s: 1 }); $('cZoom').value = 1; drawCrop(); scheduleArt() }
+$('cReset').onclick = () => { Object.assign(cropState, { x: 0, y: 0, s: 1 }); $('cZoom').value = 1; zoomFill(); drawCrop(); scheduleArt() }
 $('cReplace').onclick = () => pickFile(cropKey)
-$('cRemove').onclick = () => { delete draft.slots[cropKey]; draftImgs[cropKey] = null; $('crop').classList.add('hidden'); rebuildDraft(); renderSlots() }
+$('cRemove').onclick = async () => { if (!(await ask({ h: t('rmH'), p: t('rmP'), ok: t('rmOk'), danger: true }))) return; draftDirty = true; delete draft.slots[cropKey]; draftImgs[cropKey] = null; $('crop').classList.add('hidden'); rebuildDraft(); renderSlots() }
+$('cBack').onclick = () => $('cDone').onclick()
+$('cZoomIn').onclick = () => setZoom(cropState.s * 1.15); $('cZoomOut').onclick = () => setZoom(cropState.s / 1.15)
 $('cDone').onclick = () => { $('crop').classList.add('hidden'); rebuildDraft(); renderSlots() }
 addEventListener('resize', () => { if (!$('crop').classList.contains('hidden')) drawCrop() })
 
@@ -1065,11 +1124,11 @@ $('sort').value = fSort; $('sort').onchange = (e) => { fSort = e.target.value; s
 // the preset (exposure, colour temperature: absolute). Persisted in localStorage.
 const HDRI = { gallery: 'gallery', studio: 'studio', loft: 'loft' }
 const PRESETS = {
-  gallery: { sw: ['#2c2620', '#d79f5c'], hdri: 'gallery', env: 0.4, exposure: 1, ambient: 1, spot: 0.9, shelf: 0.85, temp: 2900, shelfTemp: 3000, wall: '#6d655c', floor: ['#9a938b', 0.42, 0.7], back: '#1b1916' },
-  museum: { sw: ['#9ea3a6', '#f1f4f6'], hdri: 'gallery', env: 0.6, exposure: 1.05, ambient: 3, spot: 1.1, shelf: 0.8, temp: 4000, shelfTemp: 3500, wall: '#a9acab', floor: ['#c2bfb8', 0.5, 0.45], back: '#2b2d2e' },
-  night: { sw: ['#0c0b0a', '#b8732f'], hdri: 'gallery', env: 0.1, exposure: 1, ambient: 0.2, spot: 0.08, shelf: 1.25, temp: 2700, shelfTemp: 2700, wall: '#4b443d', floor: ['#5a534c', 0.22, 0.9], back: '#0a0908' },
-  daylight: { sw: ['#e8e2d6', '#a9c8e4'], hdri: 'loft', env: 1, exposure: 1, ambient: 16, spot: 0.3, shelf: 0.45, temp: 5600, shelfTemp: 4200, wall: '#c9c2b6', floor: ['#bdb4a6', 0.5, 0.35], back: '#5e5b56' },
-  studio: { sw: ['#5c5c5c', '#c4c4c4'], hdri: 'studio', env: 0.85, exposure: 1, ambient: 6, spot: 0.7, shelf: 0.6, temp: 4600, shelfTemp: 3700, wall: '#7b7b7b', floor: ['#7b7b7b', 0.85, 0], back: '#474747', flat: true },
+  gallery: { ui: 'dark', tint: '#d79f5c', sw: ['#2c2620', '#d79f5c'], hdri: 'gallery', env: 0.4, exposure: 1, ambient: 1, spot: 0.9, shelf: 0.85, temp: 2900, shelfTemp: 3000, wall: '#6d655c', floor: ['#9a938b', 0.42, 0.7], back: '#1b1916' },
+  museum: { ui: 'light', tint: '#dfe6ec', sw: ['#9ea3a6', '#f1f4f6'], hdri: 'gallery', env: 0.6, exposure: 1.05, ambient: 3, spot: 1.1, shelf: 0.8, temp: 4000, shelfTemp: 3500, wall: '#a9acab', floor: ['#c2bfb8', 0.5, 0.45], back: '#2b2d2e' },
+  night: { ui: 'dark', tint: '#b8732f', sw: ['#0c0b0a', '#b8732f'], hdri: 'gallery', env: 0.1, exposure: 1, ambient: 0.2, spot: 0.08, shelf: 1.25, temp: 2700, shelfTemp: 2700, wall: '#4b443d', floor: ['#5a534c', 0.22, 0.9], back: '#0a0908' },
+  daylight: { ui: 'light', tint: '#efe4cf', sw: ['#e8e2d6', '#a9c8e4'], hdri: 'loft', env: 1, exposure: 1, ambient: 16, spot: 0.3, shelf: 0.45, temp: 5600, shelfTemp: 4200, wall: '#c9c2b6', floor: ['#bdb4a6', 0.5, 0.35], back: '#5e5b56' },
+  studio: { ui: 'light', tint: '#cfcfcf', sw: ['#5c5c5c', '#c4c4c4'], hdri: 'studio', env: 0.85, exposure: 1, ambient: 6, spot: 0.7, shelf: 0.6, temp: 4600, shelfTemp: 3700, wall: '#7b7b7b', floor: ['#7b7b7b', 0.85, 0], back: '#474747', flat: true },
 }
 const SLIDERS = [['exposure', 0.4, 2, 0.01, (v) => v.toFixed(2)], ['ambient', 0, 3, 0.01], ['spot', 0, 3, 0.01], ['shelf', 0, 3, 0.01], ['temp', 2200, 6500, 50, (v) => `${v} K`], ['bg', 0.2, 2.5, 0.01]]
 const envDefaults = (k) => ({ preset: k, exposure: PRESETS[k].exposure, ambient: 1, spot: 1, shelf: 1, temp: PRESETS[k].temp, bg: 1 })
@@ -1104,6 +1163,8 @@ function applyEnv(persist = true) {
   const P = PRESETS[env.preset], amb = P.ambient * env.ambient, sp = P.spot * env.spot, sh = P.shelf * env.shelf, bg = env.bg
   const tS = env.temp, tF = env.temp + (P.shelfTemp - P.temp)
   renderer.toneMappingExposure = env.exposure
+  document.body.dataset.ui = P.ui; document.documentElement.style.setProperty('--chip-tint', P.tint); toneForce = true
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', P.ui === 'dark' ? '#1b1916' : '#f3f1ec')
   BAKED?.setMix?.([tintVs(tS, K_SPOT).map((v) => v * sp), tintVs(tF, K_SHELF).map((v) => v * sh), [amb, amb, amb]])
   const base = BAKED ? [70, 70, 39, 120, 120] : [150, 150, 0, 120, 120], cS = lightCol(tS), cF = lightCol(tF)
   spots.forEach((l, i) => { l.intensity = base[i] * sp; l.color.copy(cS) })
