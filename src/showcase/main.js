@@ -706,12 +706,71 @@ function camShelfGoal() {
   const d = Math.max(distH, distW) + CD / 2
   return { p: new THREE.Vector3(c.x + d * 0.12, c.y + 0.35, d), t: new THREE.Vector3(c.x, c.y - 0.05, 0) }
 }
-// one fixed inspect camera: opening the case, taking the disc out or pulling the cover move the ITEMS, not the view
-function camInspectGoal() {
-  const d = mobile && innerWidth < innerHeight ? 5.2 : 4.0
-  return { p: INS.clone().add(new THREE.Vector3(0.75, 0.42, d)), t: INS.clone() }
+// inspect camera: one fixed view direction (the items move, not the view); only its distance and a lateral/vertical shift
+// adapt so the item in its REST pose (user rotation/zoom excluded) fits the visible area between the top bar / title card
+// and the toolbar with a FIT_M margin, centred in that area. Never closer than the base distance.
+const FIT_M = 0.06
+function camInspectGoal() { return inspectFitPose() }
+const floatPoint = () => INS.clone().lerp(inspCam(new THREE.Vector3()), model.kind === 'cart' ? 0.5 : 0.4)
+let _insets = null, _insetsT = -1
+function visibleNdc() { // visible rect of the canvas in NDC: [x0, x1, y0, y1]
+  const now = performance.now(); if (_insets && now - _insetsT < 300) return _insets
+  const W = innerWidth, H = innerHeight; let top = 0, bot = H
+  const bar = document.querySelector('header.bar'), hd = $('ihead'), tb = $('ibar')
+  const rb = bar && bar.getBoundingClientRect(); if (rb && rb.height) { const b = [...bar.children].reduce((m, el) => { const r = el.getBoundingClientRect(); return r.height ? Math.max(m, r.bottom) : m }, 0); top = Math.max(top, b || rb.bottom) }
+  const rh = hd && hd.getBoundingClientRect(); if (rh && rh.height && rh.width > W * 0.5) top = Math.max(top, rh.bottom)
+  const rt = tb && tb.getBoundingClientRect(); if (rt && rt.height) bot = Math.min(bot, rt.top); else if (_insets) return _insets
+  top = Math.min(top, H * 0.35); bot = Math.max(bot, H * 0.65)
+  _insets = [-1, 1, 1 - (2 * bot) / H, 1 - (2 * top) / H]; _insetsT = now; return _insets
 }
-const floatPoint = () => INS.clone().lerp(camInspectGoal().p, model.kind === 'cart' ? 0.5 : 0.4)
+const _fitCam = new THREE.PerspectiveCamera(), _fitPts = Array.from({ length: 8 }, () => new THREE.Vector3()), _fitB = new THREE.Box3(), _fitB2 = new THREE.Box3(), _fitM = new THREE.Matrix4(), _fitInv = new THREE.Matrix4()
+const _fz = new THREE.Vector3(), _fx = new THREE.Vector3(), _fy = new THREE.Vector3(), _fc = new THREE.Vector3(), _ft = new THREE.Vector3(), _fv = new THREE.Vector3()
+const _sp2 = new THREE.Vector3(); let sheetRest = null // { P, w, h } written by tick: flat sheet rest centre + size (no user offset)
+/** rest-pose points of what the inspect view is about: flat cover sheet / lifted disc / the (opening) case */
+function inspectContent() {
+  let n = 0; const quad = (c, hw, hh) => { for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) _fitPts[n++].copy(c).addScaledVector(_fx, a * hw).addScaledVector(_fy, b * hh) }
+  if (sheetK > 0.5 && !sheetDock && sheetRest) quad(sheetRest.P, sheetRest.w / 2, sheetRest.h / 2)
+  else if (holder.visible && (discFocus || out > 0.5)) {
+    const d = model.disc; if (!d.geometry?.boundingBox && d.geometry) d.geometry.computeBoundingBox()
+    let r = 0.6 // world-space half extent (local bounds × scale), independent of the current spin
+    if (d.geometry?.boundingBox) { const b = d.geometry.boundingBox; r = (Math.max(b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z) / 2) * d.scale.x }
+    else { d.updateMatrixWorld(true); _fitInv.copy(d.matrixWorld).invert(); _fitB.makeEmpty(); d.traverse((o) => { if (o.isMesh && o.geometry) { if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); _fitB.union(_fitB2.copy(o.geometry.boundingBox).applyMatrix4(_fitM.multiplyMatrices(_fitInv, o.matrixWorld))) } })
+      if (!_fitB.isEmpty()) { _fitB.getSize(_fv); r = (Math.max(_fv.x, _fv.y, _fv.z) / 2) * d.scale.x } }
+    const F = floatPoint(); quad(F, r, r)
+  } else {
+    const R = model.root, rest = _fc.copy(INS).add(_fv.set(0.62 * open, 0, 0))
+    if (!holder.visible || open < 0.02) { _fitB.set(_fv.set(-model.W / 2, -model.H / 2, -model.D / 2), _ft.set(model.W / 2, model.H / 2, model.D / 2)) }
+    else {
+      R.updateMatrixWorld(true); _fitInv.copy(R.matrixWorld).invert(); _fitB.makeEmpty()
+      R.traverse((o) => { if (!o.isMesh || !o.visible || !o.geometry) return; for (let q = o; q && q !== R; q = q.parent) if (q === model.sheetG || q === model.disc) return
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); _fitB.union(_fitB2.copy(o.geometry.boundingBox).applyMatrix4(_fitM.multiplyMatrices(_fitInv, o.matrixWorld))) })
+      if (_fitB.isEmpty()) _fitB.set(_fv.set(-model.W / 2, -model.H / 2, -model.D / 2), _ft.set(model.W / 2, model.H / 2, model.D / 2))
+    }
+    for (let i = 0; i < 8; i++) _fitPts[n++].set(i & 1 ? _fitB.max.x : _fitB.min.x, i & 2 ? _fitB.max.y : _fitB.min.y, i & 4 ? _fitB.max.z : _fitB.min.z).add(rest)
+  }
+  return n
+}
+function _fitExt(t, D, n) { // projected NDC extents of the content with the camera at t + z·D looking at t
+  _fitCam.position.copy(t).addScaledVector(_fz, D); _fitCam.lookAt(t); _fitCam.updateMatrixWorld(); _fitCam.matrixWorldInverse.copy(_fitCam.matrixWorld).invert()
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9
+  for (let i = 0; i < n; i++) { const v = _fv.copy(_fitPts[i]).project(_fitCam); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y) }
+  return [x0, x1, y0, y1]
+}
+function inspectFitPose() {
+  const base = inspCam(new THREE.Vector3()), D0 = base.distanceTo(INS); _fz.copy(base).sub(INS).normalize()
+  _fx.crossVectors(camera.up, _fz).normalize(); _fy.crossVectors(_fz, _fx)
+  _fitCam.fov = camera.fov; _fitCam.aspect = camera.aspect; _fitCam.near = camera.near; _fitCam.far = camera.far; _fitCam.updateProjectionMatrix()
+  const n = inspectContent(), [vx0, vx1, vy0, vy1] = visibleNdc(), mw = (vx1 - vx0) * (1 - 2 * FIT_M), mh = (vy1 - vy0) * (1 - 2 * FIT_M), xc = (vx0 + vx1) / 2, yc = (vy0 + vy1) / 2
+  const t = _ft.set(0, 0, 0); for (let i = 0; i < n; i++) t.add(_fitPts[i]); t.divideScalar(n)
+  const tanY = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2), tanX = tanY * camera.aspect; let D = D0
+  for (let it = 0; it < 3; it++) {
+    const fits = (d) => { const e = _fitExt(t, d, n); return e[1] - e[0] <= mw && e[3] - e[2] <= mh }
+    if (fits(D0)) D = D0; else { let lo = D0, hi = D0 * 1.5; while (!fits(hi) && hi < D0 * 8) { lo = hi; hi *= 1.5 } for (let k = 0; k < 22; k++) { const m = (lo + hi) / 2; if (fits(m)) hi = m; else lo = m } D = hi }
+    const e = _fitExt(t, D, n), ex = (e[0] + e[1]) / 2 - xc, ey = (e[2] + e[3]) / 2 - yc
+    t.addScaledVector(_fx, ex * D * tanX).addScaledVector(_fy, ey * D * tanY)
+  }
+  return { p: t.clone().addScaledVector(_fz, D), t: t.clone() }
+}
 let camGoal = null
 function goCam(g) { if (!auto || !camSod.live) camSod.reset(camera.position, controls.target, camVel, tgtVel); camGoal = g; auto = true }
 // free-camera follower: critically damped second-order dynamics on position and target (velocity carries over)
@@ -855,6 +914,7 @@ function tick() {
       const cp = inspCam(_cp), P = _sp.copy(INS).lerp(_dockP.copy(INS).add(DOCK_OFF), dockK); if (act === 'sheet') P.add(rot.offset(INS, _v)); P.addScaledVector(carry.cSheet.off, carry.cSheet.w)
       const dist = cp.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
       const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.7 * vh) / model.sheetSize.h) * (1 - 0.62 * dockK) // docked: small, upper-left, out of the way
+      sheetRest = { P: _sp2.copy(INS).lerp(_dockP, dockK), w: model.sheetSize.w * fit, h: model.sheetSize.h * fit }
       _sM.lookAt(cp, P, _up); _q.setFromRotationMatrix(_sM).multiply(_qY180); if (sFlip > 0) _q.multiply(_q2.setFromAxisAngle(_up, sFlip * Math.PI)); if (act === 'sheet') _q.premultiply(_rq); if (carry.cSheet.w > 0) _q.premultiply(carrySlerp(carry.cSheet, _cq3))
       _sM.compose(P, _q, _v.setScalar(fit)); model.setSheet(sheetK, _sM, sheetAnchor(R), sheetCasePath().kc)
     } else model.setSheet(0)
@@ -883,7 +943,7 @@ function tick() {
     camMv.p.step(dt); camMv.t.step(dt); camMv.p.get(camera.position); camMv.t.get(controls.target); busy = true
     if (!camMv.p.active && !camMv.t.active) { camScripted = false; camSod.reset(camera.position, controls.target) }
   } else if (auto && camGoal) { // free camera: critically damped second-order follow (velocity-continuous, no exponential snap)
-    const g = mode === 'shelf' ? shelfCamPose(camGoal) : camGoal
+    const g = mode === 'shelf' ? shelfCamPose(camGoal) : mode === 'inspect' ? inspectFitPose() : camGoal
     if (camSod.follow(dt, g)) busy = true
   }
   if (dt > 0) { camVel.copy(camera.position).sub(_camPrev).divideScalar(dt); tgtVel.copy(controls.target).sub(_tgtPrev).divideScalar(dt) } _camPrev.copy(camera.position); _tgtPrev.copy(controls.target)
@@ -1414,14 +1474,14 @@ async function boot() {
   const _dbl = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), _rc = new THREE.Raycaster()
   // screen-space centring probe: NDC x/y of the projected bbox centre of the visible cabinet and of the focused item (−1..1, 0 = viewport centre)
   window.__sc.center = () => {
-    camera.updateMatrixWorld(); const pr = (b) => { if (b.isEmpty()) return null; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (let i = 0; i < 8; i++) { const v = new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y) } return { cx: +((x0 + x1) / 2).toFixed(4), cy: +((y0 + y1) / 2).toFixed(4), w: +(x1 - x0).toFixed(3) } }
+    camera.updateMatrixWorld(); const pr = (b) => { if (b.isEmpty()) return null; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (let i = 0; i < 8; i++) { const v = new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y) } return { cx: +((x0 + x1) / 2).toFixed(4), cy: +((y0 + y1) / 2).toFixed(4), w: +(x1 - x0).toFixed(3), e: [x0, x1, y0, y1].map((v) => +v.toFixed(3)) } }
     const c = cabinetCenter(), cab = new THREE.Box3(new THREE.Vector3(c.x - CW / 2 - FT, 0, -CD / 2), new THREE.Vector3(c.x + CW / 2 + FT, PLINTH + NSH * SP + FT, CD / 2))
     const f = new THREE.Box3(); const p = sel && proxies.get(sel.id)
     const what = !holder.visible ? 'proxy' : sheetK > 0.5 ? 'sheet' : out > 0.5 || discFocus ? 'disc' : 'case'
     if (holder.visible) { f.expandByObject(what === 'sheet' ? model.sheetG : what === 'disc' ? model.disc : model.root, true) } else if (p && p.visible && mode !== 'shelf') f.expandByObject(p, true)
     const fc = holder.visible ? model.root.getWorldPosition(new THREE.Vector3()).project(camera) : null
     const vo = camera.view && camera.view.enabled ? [camera.view.offsetX, camera.view.offsetY] : null, r = renderer.domElement.getBoundingClientRect()
-    return { mode, what, cab: pr(cab), foc: pr(f), focPivot: fc && [+fc.x.toFixed(4), +fc.y.toFixed(4)], vo, canvas: [r.left, r.width, innerWidth, renderer.domElement.width], par: par.toArray(), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
+    return { mode, what, vis: mode === 'inspect' ? visibleNdc().map((v) => +v.toFixed(3)) : null, cam3: camera.position.distanceTo(controls.target).toFixed(2), cab: pr(cab), foc: pr(f), focPivot: fc && [+fc.x.toFixed(4), +fc.y.toFixed(4)], vo, canvas: [r.left, r.width, innerWidth, renderer.domElement.width], par: par.toArray(), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
   }
   window.__sc.dims = () => { model.root.updateMatrixWorld(true); const inv = model.root.matrixWorld.clone().invert(), out = {}; model.root.traverse((o) => { if (o.isMesh && o.material === model.shellMat && o.visible) { const b = new THREE.Box3().setFromObject(o, true).applyMatrix4(inv); out[o.name || o.geometry.type + o.id] = [b.min.toArray().map((v) => +v.toFixed(4)), b.max.toArray().map((v) => +v.toFixed(4))] } }); return { W: model.W, H: model.H, D: model.D, HALF: model.HALF, out } }
   window.__sc.clip = (rows = 9) => {

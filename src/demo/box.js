@@ -304,14 +304,59 @@ const _offB = new THREE.Vector3(), _latB = new THREE.Vector3(), _ancB = new THRE
 const HINGE_MAX = THREE.MathUtils.degToRad(178) // book open — almost flat
 const clock = new THREE.Clock()
 const _lift = new THREE.Vector3()
-// orbit-mode camera framing: the open book (lid swung out to the side) is centred by its bounds; the cover sheet and the disc
-// are already placed on the camera axis, so everything else frames the fixed TARGET
-const _fb = new THREE.Box3(), _fp = new THREE.Vector3(), _fc = new THREE.Vector3(), _fd = new THREE.Vector3()
-const frameSod = new SOD3(0.9, 1, 0, TARGET); let framing = 0
-function framePoint(outV) {
-  outV.copy(TARGET); if (!(open > 0.05 && sheetK <= 0 && out < 0.1)) return outV
-  _fb.setFromObject(root); if (_fb.isEmpty()) return outV
-  _fb.getCenter(_fc); return outV.set(THREE.MathUtils.lerp(TARGET.x, _fc.x, Math.min(1, open)), TARGET.y, TARGET.z)
+// camera fit: one fixed view direction (HOME → TARGET); the distance grows (never below the base) and the aim shifts so the
+// item in its REST pose (no user rotation / pan / zoom) fits the visible area between the top bar / title and the button
+// panel with FIT_M margin, centred in it. Followed by critically damped second-order dynamics (velocity-continuous).
+const FIT_M = 0.06, _fb = new THREE.Box3(), _fb2 = new THREE.Box3(), _fm = new THREE.Matrix4(), _fi = new THREE.Matrix4(), _fcam = new THREE.PerspectiveCamera()
+const _fz = new THREE.Vector3(), _fx = new THREE.Vector3(), _fy = new THREE.Vector3(), _fv = new THREE.Vector3(), _ft = new THREE.Vector3(), _fP = new THREE.Vector3(), _fQ = new THREE.Vector3()
+const _fqR = new THREE.Quaternion(), _feR = new THREE.Euler(), fitPts = Array.from({ length: 16 }, () => new THREE.Vector3()), fitSodP = new SOD3(1.0, 1, 0, HOME), fitSodT = new SOD3(1.0, 1, 0, TARGET); let framing = 0, fitNoZoom = false
+const sheetRestB = { P: new THREE.Vector3(), w: 1, h: 1 }
+let _vis = null, _visT = -1
+function visibleNdc() {
+  const now = performance.now(); if (_vis && now - _visT < 300) return _vis
+  const W = innerWidth, H = innerHeight; let top = 0, bot = H
+  const tp = document.querySelector('header.top'); if (tp) for (const el of tp.querySelectorAll('a,button')) { const r = el.getBoundingClientRect(); if (r.height) top = Math.max(top, r.bottom) }
+  const ti = document.querySelector('.title'); if (ti) { const r = ti.getBoundingClientRect(); if (r.height && r.width > W * 0.5) top = Math.max(top, r.bottom) }
+  for (const sel of ['nav.panel', '#hint']) { const el = document.querySelector(sel), r = el && el.getBoundingClientRect(); if (r && r.height && r.width > W * 0.4) bot = Math.min(bot, r.top) }
+  top = Math.min(top, H * 0.35); bot = Math.max(bot, H * 0.65); _vis = [-1, 1, 1 - (2 * bot) / H, 1 - (2 * top) / H]; _visT = now; return _vis
+}
+function fitContent() {
+  let n = 0; fitNoZoom = false; const quad = (c, hw, hh) => { for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) fitPts[n++].copy(c).addScaledVector(_fx, a * hw).addScaledVector(_fy, b * hh) }
+  const localBox = (o, skip) => { o.updateMatrixWorld(true); _fi.copy(o.matrixWorld).invert(); _fb.makeEmpty()
+    o.traverse((m) => { if (!m.isMesh || !m.visible || !m.geometry) return; for (let q = m; q && q !== o; q = q.parent) if (skip && skip.includes(q)) return
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox(); _fb.union(_fb2.copy(m.geometry.boundingBox).applyMatrix4(_fm.multiplyMatrices(_fi, m.matrixWorld))) }); return _fb }
+  // the flat sheet scales itself to the camera distance (screen size is distance-independent): centre it, keep the distance
+  if (sheetK > 0.5 && !sheetDock) { fitNoZoom = true; quad(sheetRestB.P, sheetRestB.w / 2, sheetRestB.h / 2); return n }
+  if (discFocus || out > 0.5) { const b = localBox(disc); if (b.isEmpty()) return 0; b.getSize(_fv); const r = (Math.hypot(_fv.x, _fv.y) / 2) * disc.scale.x; _fqR.setFromEuler(_feR.set(-0.42, 0, 0)) // spin-invariant: the circle it sweeps, in its focus tilt
+    for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; fitPts[n++].copy(_fQ.set(Math.cos(a) * r, Math.sin(a) * r, 0).applyQuaternion(_fqR)).add(FLOAT) } return n }
+  const b = localBox(root, [disc]); if (b.isEmpty()) return 0
+  const rest = _fP.set(0, H / 2 + 0.0005, 0).add(_fQ.set(0.62 * open, 0, 0))
+  for (let i = 0; i < 8; i++) fitPts[n++].set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).add(rest)
+  return n
+}
+function fitExt(t, D, n) {
+  _fcam.position.copy(t).addScaledVector(_fz, D); _fcam.lookAt(t); _fcam.updateMatrixWorld(); _fcam.matrixWorldInverse.copy(_fcam.matrixWorld).invert()
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (let i = 0; i < n; i++) { const v = _fv.copy(fitPts[i]).project(_fcam); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y) }
+  return [x0, x1, y0, y1]
+}
+const _fitOut = { p: new THREE.Vector3(), t: new THREE.Vector3() }
+function boxFitPose() {
+  const D0 = HOME.distanceTo(TARGET); _fz.copy(HOME).sub(TARGET).normalize(); _fx.crossVectors(camera.up, _fz).normalize(); _fy.crossVectors(_fz, _fx)
+  const n = fitContent(); if (!n) { _fitOut.p.copy(HOME); _fitOut.t.copy(TARGET); return _fitOut }
+  _fcam.fov = camera.fov; _fcam.aspect = camera.aspect; _fcam.near = camera.near; _fcam.far = camera.far; _fcam.updateProjectionMatrix()
+  const [vx0, vx1, vy0, vy1] = visibleNdc(), mw = (vx1 - vx0) * (1 - 2 * FIT_M), mh = (vy1 - vy0) * (1 - 2 * FIT_M), xc = (vx0 + vx1) / 2, yc = (vy0 + vy1) / 2
+  const tanY = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2), tanX = tanY * camera.aspect
+  const t = _ft.copy(TARGET); let D = D0
+  for (let it = 0; it < 3; it++) {
+    const fits = (d) => { const e = fitExt(t, d, n); return e[1] - e[0] <= mw && e[3] - e[2] <= mh }
+    if (fitNoZoom || fits(D0)) D = D0; else { let lo = D0, hi = D0 * 1.5; while (!fits(hi) && hi < D0 * 8) { lo = hi; hi *= 1.5 } for (let k = 0; k < 22; k++) { const m = (lo + hi) / 2; if (fits(m)) hi = m; else lo = m } D = hi }
+    const e = fitExt(t, D, n); t.addScaledVector(_fx, ((e[0] + e[1]) / 2 - xc) * D * tanX).addScaledVector(_fy, ((e[2] + e[3]) / 2 - yc) * D * tanY)
+  }
+  _fitOut.t.copy(t); _fitOut.p.copy(t).addScaledVector(_fz, D); return _fitOut
+}
+function followFit(dt) {
+  if (!framing) { fitSodP.reset(camera.position); fitSodT.reset(controls.target) } framing = 2
+  const g = boxFitPose(); camera.position.copy(fitSodP.update(dt, g.p)); controls.target.copy(fitSodT.update(dt, g.t))
 }
 const _dock = new THREE.Vector3(), _tmp = new THREE.Vector3(), _ctr = new THREE.Vector3(), _sp = new THREE.Vector3(), _rq = new THREE.Quaternion(), _qI = new THREE.Quaternion(), _sq = new THREE.Quaternion(), _sM = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _qY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
 let releaseArmed = false
@@ -366,6 +411,7 @@ function tick() {
     const P = _sp.copy(TARGET).add(_tmp.set(0, 0.1, 0)).lerp(_dock.set(-1.15, 1.3, -0.5), dockK); if (act === 'sheet') P.add(rot.offset(P, _tmp))
     const dist = camera.position.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
     const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.66 * vh) / model.sheetSize.h) * (1 - 0.6 * dockK)
+    sheetRestB.P.copy(TARGET).add(_tmp.set(0, 0.1, 0)).lerp(_dock.set(-1.15, 1.3, -0.5), dockK); sheetRestB.w = model.sheetSize.w * fit; sheetRestB.h = model.sheetSize.h * fit
     _sM.lookAt(camera.position, P, _up); _sq.setFromRotationMatrix(_sM).multiply(_qY180); if (act === 'sheet') _sq.premultiply(_rq)
     _sM.compose(P, _sq, _tmp.setScalar(fit)); root.updateMatrixWorld(true)
     const anc = _latB.lengthSq() > 0 || caseAway > 0 ? _ancB.makeTranslation(_tmp.copy(_latB).negate().add(_lift.set(caseAway * 7, 0, 0))).multiply(root.matrixWorld) : null
@@ -436,14 +482,14 @@ function tick() {
     // when entering/leaving focus, ease camera
   }
   framing = Math.max(0, framing - 1)
-  if (!controls.enabled) { /* fixed camera */ } else if (resetT) {
+  if (!controls.enabled) { if (!qs.has('cam')) followFit(dt) } else if (resetT) {
     const k = 1 - Math.exp(-dt * 6)
-    const tg = discFocus ? DISC_TARGET : framePoint(_fp), cg = discFocus ? DISC_HOME : _fc.copy(HOME).add(tg).sub(TARGET)
+    const fp = boxFitPose(), tg = fp.t, cg = fp.p
     camera.position.lerp(cg, k); controls.target.lerp(tg, k)
-    if (camera.position.distanceTo(cg) < 0.015) { resetT = 0; frameSod.reset(controls.target) }
+    if (camera.position.distanceTo(cg) < 0.015) { resetT = 0; framing = 0 }
   } else if (discFocus) {
     const k = 1 - Math.exp(-dt * 2.8)
-    if (!userMoved) { controls.target.lerp(disc.getWorldPosition(_fc), k); camera.position.lerp(DISC_HOME, k * 0.6) } // aim at the disc itself so it stays centred
+    if (!userMoved) followFit(dt) // disc fitted + centred like every other state
     controls.minDistance = 0.35
     controls.maxDistance = 3.5
   } else {
@@ -456,14 +502,14 @@ function tick() {
     } else {
       // keep whatever is being looked at centred on screen (open book, case moving off for the cover, disc out): the target
       // follows the centre of the framed bounds on a critically damped spring and the camera pans with it (same view angle)
-      if (!framing) frameSod.reset(controls.target); framing = 2
-      const g = frameSod.update(dt, framePoint(_fp)); _fd.copy(g).sub(controls.target); controls.target.add(_fd); camera.position.add(_fd)
+      followFit(dt)
     }
   }
 
   const uiKey = `${sheetK > 0}|${sheetK >= 1}|${sheetT}|${sheetDock}|${open > 0.65}|${openTarget}|${out > 0.02}|${out > 0.5}|${out > 0.85}|${outTarget}|${hubPressTarget}|${discFocus}`
   if (uiKey !== lastUiKey) { lastUiKey = uiKey; syncUI() }
 
+  if (framing) controls.maxDistance = Math.max(controls.maxDistance, _fitOut.p.distanceTo(_fitOut.t) + 1) // OrbitControls clamps the radius even while disabled
   controls.update()
   renderer.render(scene, camera)
 }
@@ -473,9 +519,15 @@ addEventListener('pagehide', () => { renderer.setAnimationLoop(null); envRT.disp
 syncUI()
 // screen-space centring probe (NDC x/y of projected bbox centres; 0 = viewport centre)
 window.__boxCenter = () => {
-  camera.updateMatrixWorld(); const pr = (o) => { const b = new THREE.Box3().expandByObject(o, true); if (b.isEmpty()) return null; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (let i = 0; i < 8; i++) { const v = new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y) } return { cx: +((x0 + x1) / 2).toFixed(4), cy: +((y0 + y1) / 2).toFixed(4), w: +(x1 - x0).toFixed(3) } }
+  camera.updateMatrixWorld(); const pr = (o) => { // exact silhouette extents: project every (strided) vertex of every visible mesh
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; const v = new THREE.Vector3()
+    o.traverseVisible((m) => { if (!m.isMesh || !m.geometry?.attributes.position) return; const a = m.geometry.attributes.position, st = Math.max(1, Math.floor(a.count / 4000))
+      for (let i = 0; i < a.count; i += st) { v.fromBufferAttribute(a, i).applyMatrix4(m.matrixWorld).project(camera); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y) } })
+    return x0 > x1 ? null : { cx: +((x0 + x1) / 2).toFixed(4), cy: +((y0 + y1) / 2).toFixed(4), w: +(x1 - x0).toFixed(3), e: [x0, x1, y0, y1].map((q) => +q.toFixed(3)) } }
   const what = sheetK > 0.5 ? 'sheet' : out > 0.5 || discFocus ? 'disc' : 'case'
-  return { dbg: [controls.enabled, userMoved, resetT, framing, discFocus, +sheetK.toFixed(2), sheetDock, +open.toFixed(2)], what, foc: pr(what === 'sheet' ? model.sheetG : what === 'disc' ? disc : root), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
+  const lb = new THREE.Box3(); disc.updateMatrixWorld(true); const inv = disc.matrixWorld.clone().invert(); disc.traverse((m) => { if (m.isMesh) { if (!m.geometry.boundingBox) m.geometry.computeBoundingBox(); lb.union(m.geometry.boundingBox.clone().applyMatrix4(inv.clone().multiply(m.matrixWorld))) } })
+  const dd = { dp: disc.position.toArray().map((v) => +v.toFixed(3)), F: FLOAT.toArray().map((v) => +v.toFixed(3)), lc: lb.getCenter(new THREE.Vector3()).toArray().map((v) => +v.toFixed(3)), ls: lb.getSize(new THREE.Vector3()).toArray().map((v) => +v.toFixed(3)), sc: disc.scale.x, par: disc.parent.type, fitT: _fitOut.t.toArray().map((v) => +v.toFixed(3)) }
+  return { dd, vis: visibleNdc().map((v) => +v.toFixed(3)), D: +camera.position.distanceTo(controls.target).toFixed(2), dbg: [controls.enabled, userMoved, resetT, framing, discFocus, +sheetK.toFixed(2), sheetDock, +open.toFixed(2)], what, foc: pr(what === 'sheet' ? model.sheetG : what === 'disc' ? disc : root), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
 }
 window.__box = () => ({ kids: root.children.length, sheetKids: model.sheetG.children.length, dock: sheetDock, discScale: +disc.scale.x.toFixed(2), open: +open.toFixed(2), hubPress: +hubPress.toFixed(2), out: +out.toFixed(2), discFocus, sheet: +sheetK.toFixed(2), yaw: +rot.yaw.toFixed(2), obj: rotObj, cam: camera.position.toArray().map((v) => +v.toFixed(4)) })
 window.__boxRot = (y, p) => rot.set(y, p || 0)
