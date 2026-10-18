@@ -122,6 +122,10 @@ function clampPan() {
 }
 const par = new THREE.Vector2()
 addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') par.set(e.clientX / innerWidth - 0.5, e.clientY / innerHeight - 0.5) })
+// parallax rests centred: pointer leaving the window / tab blur / touch input → back to the centre (no stale edge offset)
+const parCentre = () => par.set(0, 0)
+document.documentElement.addEventListener('pointerleave', parCentre); addEventListener('blur', parCentre)
+addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') parCentre() })
 
 // ---------------- gallery lighting ----------------
 // Dim warm room fill; the exhibit is lit by 2900K track spots + per-shelf LED grazers (lightRig below).
@@ -885,7 +889,11 @@ function tick() {
   if (dt > 0) { camVel.copy(camera.position).sub(_camPrev).divideScalar(dt); tgtVel.copy(controls.target).sub(_tgtPrev).divideScalar(dt) } _camPrev.copy(camera.position); _tgtPrev.copy(controls.target)
   controls.enabled = mode === 'shelf'; rot.enabled = mode === 'inspect'
   if (vignette) { const vt = mode === 'inspect' ? 0.52 : 0.32, u = vignette.uniforms.uAmt; if (Math.abs(u.value - vt) > 0.002) { u.value += (vt - u.value) * (1 - Math.exp(-dt * 5)); busy = true } }
-  const changed = camScripted || (auto && camGoal) ? false : controls.update() // scripted / auto camera: OrbitControls must not damp or clamp it
+  // scripted / auto camera: OrbitControls must not damp or clamp it — but it was also the only thing aiming the camera, so aim it here
+  // (without this the view kept the orientation of the last manual frame and every animated pose rendered off-centre)
+  const scriptedCam = camScripted || (auto && camGoal)
+  if (scriptedCam) camera.lookAt(controls.target)
+  const changed = scriptedCam ? false : controls.update()
   interactionLOD(mode === 'inspect' && (rot.active || busy), dt)
   if (window.__rec) window.__rec.push(window.__sc.probe())
   if (busy || changed || dirty > 0) { const t0 = performance.now(); draw(); perfSample(performance.now() - t0, dt); dirty = Math.max(0, dirty - 1) }
@@ -1404,6 +1412,17 @@ async function boot() {
   // shell meshes (crossing = the paper passes through plastic), and every sample casts along ±normal: if the first plastic
   // face it meets is a back face, the sample sits INSIDE the plastic wall.
   const _dbl = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), _rc = new THREE.Raycaster()
+  // screen-space centring probe: NDC x/y of the projected bbox centre of the visible cabinet and of the focused item (−1..1, 0 = viewport centre)
+  window.__sc.center = () => {
+    camera.updateMatrixWorld(); const pr = (b) => { if (b.isEmpty()) return null; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (let i = 0; i < 8; i++) { const v = new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y) } return { cx: +((x0 + x1) / 2).toFixed(4), cy: +((y0 + y1) / 2).toFixed(4), w: +(x1 - x0).toFixed(3) } }
+    const c = cabinetCenter(), cab = new THREE.Box3(new THREE.Vector3(c.x - CW / 2 - FT, 0, -CD / 2), new THREE.Vector3(c.x + CW / 2 + FT, PLINTH + NSH * SP + FT, CD / 2))
+    const f = new THREE.Box3(); const p = sel && proxies.get(sel.id)
+    const what = !holder.visible ? 'proxy' : sheetK > 0.5 ? 'sheet' : out > 0.5 || discFocus ? 'disc' : 'case'
+    if (holder.visible) { f.expandByObject(what === 'sheet' ? model.sheetG : what === 'disc' ? model.disc : model.root, true) } else if (p && p.visible && mode !== 'shelf') f.expandByObject(p, true)
+    const fc = holder.visible ? model.root.getWorldPosition(new THREE.Vector3()).project(camera) : null
+    const vo = camera.view && camera.view.enabled ? [camera.view.offsetX, camera.view.offsetY] : null, r = renderer.domElement.getBoundingClientRect()
+    return { mode, what, cab: pr(cab), foc: pr(f), focPivot: fc && [+fc.x.toFixed(4), +fc.y.toFixed(4)], vo, canvas: [r.left, r.width, innerWidth, renderer.domElement.width], par: par.toArray(), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
+  }
   window.__sc.dims = () => { model.root.updateMatrixWorld(true); const inv = model.root.matrixWorld.clone().invert(), out = {}; model.root.traverse((o) => { if (o.isMesh && o.material === model.shellMat && o.visible) { const b = new THREE.Box3().setFromObject(o, true).applyMatrix4(inv); out[o.name || o.geometry.type + o.id] = [b.min.toArray().map((v) => +v.toFixed(4)), b.max.toArray().map((v) => +v.toFixed(4))] } }); return { W: model.W, H: model.H, D: model.D, HALF: model.HALF, out } }
   window.__sc.clip = (rows = 9) => {
     scene.updateMatrixWorld(true)

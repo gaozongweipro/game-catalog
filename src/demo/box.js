@@ -3,7 +3,7 @@ import './box.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { ItemRotator } from './itemRotate.js'
-import { Mover, BezierN } from './motion.js'
+import { Mover, BezierN, SOD3 } from './motion.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 const BASE = import.meta.env.BASE_URL
@@ -304,6 +304,15 @@ const _offB = new THREE.Vector3(), _latB = new THREE.Vector3(), _ancB = new THRE
 const HINGE_MAX = THREE.MathUtils.degToRad(178) // book open — almost flat
 const clock = new THREE.Clock()
 const _lift = new THREE.Vector3()
+// orbit-mode camera framing: the open book (lid swung out to the side) is centred by its bounds; the cover sheet and the disc
+// are already placed on the camera axis, so everything else frames the fixed TARGET
+const _fb = new THREE.Box3(), _fp = new THREE.Vector3(), _fc = new THREE.Vector3(), _fd = new THREE.Vector3()
+const frameSod = new SOD3(0.9, 1, 0, TARGET); let framing = 0
+function framePoint(outV) {
+  outV.copy(TARGET); if (!(open > 0.05 && sheetK <= 0 && out < 0.1)) return outV
+  _fb.setFromObject(root); if (_fb.isEmpty()) return outV
+  _fb.getCenter(_fc); return outV.set(THREE.MathUtils.lerp(TARGET.x, _fc.x, Math.min(1, open)), TARGET.y, TARGET.z)
+}
 const _dock = new THREE.Vector3(), _tmp = new THREE.Vector3(), _ctr = new THREE.Vector3(), _sp = new THREE.Vector3(), _rq = new THREE.Quaternion(), _qI = new THREE.Quaternion(), _sq = new THREE.Quaternion(), _sM = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _qY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
 let releaseArmed = false
 let reseating = false
@@ -426,14 +435,15 @@ function tick() {
   if (resetT || discFocus || (!discFocus && resetT === 0 && qs.has('shot'))) {
     // when entering/leaving focus, ease camera
   }
+  framing = Math.max(0, framing - 1)
   if (!controls.enabled) { /* fixed camera */ } else if (resetT) {
     const k = 1 - Math.exp(-dt * 6)
-    const cg = discFocus ? DISC_HOME : HOME, tg = discFocus ? DISC_TARGET : TARGET
+    const tg = discFocus ? DISC_TARGET : framePoint(_fp), cg = discFocus ? DISC_HOME : _fc.copy(HOME).add(tg).sub(TARGET)
     camera.position.lerp(cg, k); controls.target.lerp(tg, k)
-    if (camera.position.distanceTo(cg) < 0.015) resetT = 0
+    if (camera.position.distanceTo(cg) < 0.015) { resetT = 0; frameSod.reset(controls.target) }
   } else if (discFocus) {
     const k = 1 - Math.exp(-dt * 2.8)
-    if (!userMoved) { controls.target.lerp(DISC_TARGET, k); camera.position.lerp(DISC_HOME, k * 0.6) }
+    if (!userMoved) { controls.target.lerp(disc.getWorldPosition(_fc), k); camera.position.lerp(DISC_HOME, k * 0.6) } // aim at the disc itself so it stays centred
     controls.minDistance = 0.35
     controls.maxDistance = 3.5
   } else {
@@ -443,12 +453,11 @@ function tick() {
       // fixed camera for close-up shots
     } else if (userMoved) {
       // keep user's pan/orbit
-    } else if (open > 0.3 && out < 0.1) {
-      // nudge target slightly left so open book is framed
-      _tmp.set(-0.35 * open, 0.85, 0)
-      controls.target.lerp(_tmp, 1 - Math.exp(-dt * 1.5))
     } else {
-      controls.target.lerp(TARGET, 1 - Math.exp(-dt * 1.2))
+      // keep whatever is being looked at centred on screen (open book, case moving off for the cover, disc out): the target
+      // follows the centre of the framed bounds on a critically damped spring and the camera pans with it (same view angle)
+      if (!framing) frameSod.reset(controls.target); framing = 2
+      const g = frameSod.update(dt, framePoint(_fp)); _fd.copy(g).sub(controls.target); controls.target.add(_fd); camera.position.add(_fd)
     }
   }
 
@@ -462,6 +471,12 @@ renderer.setAnimationLoop(tick)
 document.addEventListener('visibilitychange', () => renderer.setAnimationLoop(document.hidden ? null : tick))
 addEventListener('pagehide', () => { renderer.setAnimationLoop(null); envRT.dispose(); renderer.dispose() })
 syncUI()
+// screen-space centring probe (NDC x/y of projected bbox centres; 0 = viewport centre)
+window.__boxCenter = () => {
+  camera.updateMatrixWorld(); const pr = (o) => { const b = new THREE.Box3().expandByObject(o, true); if (b.isEmpty()) return null; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (let i = 0; i < 8; i++) { const v = new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).project(camera); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y) } return { cx: +((x0 + x1) / 2).toFixed(4), cy: +((y0 + y1) / 2).toFixed(4), w: +(x1 - x0).toFixed(3) } }
+  const what = sheetK > 0.5 ? 'sheet' : out > 0.5 || discFocus ? 'disc' : 'case'
+  return { dbg: [controls.enabled, userMoved, resetT, framing, discFocus, +sheetK.toFixed(2), sheetDock, +open.toFixed(2)], what, foc: pr(what === 'sheet' ? model.sheetG : what === 'disc' ? disc : root), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
+}
 window.__box = () => ({ kids: root.children.length, sheetKids: model.sheetG.children.length, dock: sheetDock, discScale: +disc.scale.x.toFixed(2), open: +open.toFixed(2), hubPress: +hubPress.toFixed(2), out: +out.toFixed(2), discFocus, sheet: +sheetK.toFixed(2), yaw: +rot.yaw.toFixed(2), obj: rotObj, cam: camera.position.toArray().map((v) => +v.toFixed(4)) })
 window.__boxRot = (y, p) => rot.set(y, p || 0)
 window.__hubScreen = () => { const v = new THREE.Vector3(); btn.getWorldPosition(v); v.project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] }
