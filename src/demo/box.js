@@ -3,6 +3,7 @@ import './box.css'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { ItemRotator } from './itemRotate.js'
+import { Mover, BezierN } from './motion.js'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 const BASE = import.meta.env.BASE_URL
@@ -280,7 +281,26 @@ function resize() {
 addEventListener('resize', resize); resize()
 
 const easeIO = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2)
-const step = (v, t, dt, dur) => (t > v ? Math.min(t, v + dt / dur) : Math.max(t, v - dt / dur))
+// velocity-continuous channels (minimum-jerk quintic from the current value + velocity + acceleration; see motion.js)
+const RMb = matchMedia('(prefers-reduced-motion: reduce)')
+const MVB = {}
+function mvb(k, cur, goal, base, dt) {
+  const m = MVB[k] || (MVB[k] = new Mover(cur))
+  if (Math.abs(cur - m._out) > 1e-9) m.set(cur)
+  if (m.active ? Math.abs(m.goal - goal) > 1e-9 : Math.abs(m.x - goal) > 1e-9) { const d = base * (0.45 + 0.55 * Math.sqrt(Math.min(1, Math.abs(goal - m.x)))); m.to(goal, RMb.matches ? Math.min(0.3, d * 0.4) : d) }
+  m.step(dt); m._out = THREE.MathUtils.clamp(m.x, 0, 1); return m._out
+}
+const _cub = (a, b, c, d, k, out) => { const u = 1 - k; return out.set(0, 0, 0).addScaledVector(a, u * u * u).addScaledVector(b, 3 * u * u * k).addScaledVector(c, 3 * u * k * k).addScaledVector(d, k * k * k) }
+// cover pull-out: the case slides DOWN off the sheet (pure slide along its up axis), then curves away underneath it
+let casePathB = null
+function sheetCasePathB() {
+  const S = model.sheetSlide; if (casePathB && casePathB.S === S) return casePathB
+  const p = new THREE.CurvePath(), a = new THREE.Vector3(0, -S, 0), e = new THREE.Vector3(-3.2, -S - 0.3, -0.4)
+  const b = new BezierN([a, a.clone().add(new THREE.Vector3(0, -0.3, 0)), a.clone().add(new THREE.Vector3(0, -0.6, 0)), e.clone().add(new THREE.Vector3(1.6, 0, 0.12)), e])
+  p.add(new THREE.LineCurve3(new THREE.Vector3(), a.clone())); p.add(b); p.S = S; p.kc = S / p.getLength(); return (casePathB = p)
+}
+const _qA = new THREE.Quaternion(), _qB = new THREE.Quaternion(), _qC = new THREE.Quaternion(), _eA = new THREE.Euler(), _zAx = new THREE.Vector3(0, 0, 1)
+const _offB = new THREE.Vector3(), _latB = new THREE.Vector3(), _ancB = new THREE.Matrix4()
 const HINGE_MAX = THREE.MathUtils.degToRad(178) // book open — almost flat
 const clock = new THREE.Clock()
 const _lift = new THREE.Vector3()
@@ -292,8 +312,8 @@ let caseAway = 0
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05)
-  open = step(open, openTarget, dt, 0.95)
-  hubPress = step(hubPress, hubPressTarget, dt, 0.28)
+  open = mvb('open', open, openTarget, 0.95, dt)
+  hubPress = mvb('hub', hubPress, hubPressTarget, 0.3, dt)
 
   // After hub fully pressed, release disc
   if (hubPressTarget === 1 && hubPress > 0.92 && !outTarget && !releaseArmed) {
@@ -303,7 +323,7 @@ function tick() {
   }
   if (hubPressTarget === 0) releaseArmed = false
 
-  out = step(out, outTarget, dt, 1.05)
+  out = mvb('out', out, outTarget, 1.1, dt)
   // disc back on the hub → let the sprung teeth re-expand
   if (reseating && out < 0.01) { reseating = false; hubPressTarget = 0 }
 
@@ -314,35 +334,39 @@ function tick() {
   }
 
   // Book hinge: cover swings sideways around spine Y
-  const oe = easeIO(open)
+  const oe = open
   spineG.rotation.y = -oe * HINGE_MAX / 2
   coverHinge.rotation.y = -oe * HINGE_MAX / 2
   // ---- item rotation (camera fixed) + cover-sheet pull-out
-  sheetK = step(sheetK, sheetT, dt, 2.2); dockK = step(dockK, sheetDock ? 1 : 0, dt, 0.7)
+  sheetK = mvb('sheetK', sheetK, sheetT, 2.5, dt); dockK = mvb('dockK', dockK, sheetDock ? 1 : 0, 0.8, dt)
   if (pendingSheetIn && open < 0.01 && !openTarget && out < 0.01 && !outTarget) { pendingSheetIn = false; sheetDock = false; sheetT = 0; syncUI() }
   if (pendingSheetOut && canSheet() && open < 0.01 && out < 0.01) { pendingSheetOut = false; sheetDock = false; sheetT = 1; rot.reset(); syncUI() }
   rot.update(dt)
-  const act = discFocus ? 'disc' : sheetK > 0.34 && !sheetDock ? 'sheet' : 'case'
+  const CP = sheetCasePathB(), act = discFocus ? 'disc' : sheetK > CP.kc && !sheetDock ? 'sheet' : 'case'
   if (act !== rotObj) { rotObj = act; rot.resetNow() }
   rot.quaternion(_rq)
-  caseAway += (Math.max(discFocus ? 1 : 0, sheetDock ? 0 : THREE.MathUtils.smoothstep(sheetK, 0.4, 0.9)) - caseAway) * (1 - Math.exp(-dt * 4))
-  discAway += ((discFocus ? 1 : 0) - discAway) * (1 - Math.exp(-dt * 4)) // card enlargement follows the CARD focus only
+  caseAway = mvb('away', caseAway, discFocus ? 1 : 0, 0.95, dt)
+  discAway = mvb('discAway', discAway, discFocus ? 1 : 0, 0.9, dt) // card enlargement follows the CARD focus only
+  _offB.set(0, 0, 0); _latB.set(0, 0, 0)
+  if (sheetK > 0) { const f = 1 - dockK; _offB.copy(CP.getPoint(Math.min(1, sheetK))).multiplyScalar(f); _latB.copy(_offB).sub(_tmp.set(0, -CP.S * Math.min(1, sheetK / CP.kc) * f, 0)) }
   root.quaternion.copy(act === 'case' ? _rq : _qI)
   _ctr.set(0, H / 2 + 0.0005, 0) // open book stays centred: pivot = centre of the opened spread
-  root.position.copy(_ctr).sub(_tmp.set(-0.62 * oe, 0, 0).applyQuaternion(root.quaternion)).add(_tmp.set(-caseAway * 7, 0, 0))
+  root.position.copy(_ctr).sub(_tmp.set(-0.62 * oe, 0, 0).applyQuaternion(root.quaternion)).add(_tmp.set(-caseAway * 7, 0, 0)).add(_offB)
   if (act === 'case') root.position.add(rot.offset(_ctr, _tmp))
   if (sheetK > 0) {
-    const P = _sp.copy(TARGET).add(_tmp.set(0, 0.1, 0)).lerp(_dock.set(-1.15, 1.3, -0.5), easeIO(dockK)); if (act === 'sheet') P.add(rot.offset(P, _tmp))
+    const P = _sp.copy(TARGET).add(_tmp.set(0, 0.1, 0)).lerp(_dock.set(-1.15, 1.3, -0.5), dockK); if (act === 'sheet') P.add(rot.offset(P, _tmp))
     const dist = camera.position.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
-    const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.66 * vh) / model.sheetSize.h) * (1 - 0.6 * easeIO(dockK))
+    const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.66 * vh) / model.sheetSize.h) * (1 - 0.6 * dockK)
     _sM.lookAt(camera.position, P, _up); _sq.setFromRotationMatrix(_sM).multiply(_qY180); if (act === 'sheet') _sq.premultiply(_rq)
-    _sM.compose(P, _sq, _tmp.setScalar(fit)); model.setSheet(sheetK, _sM)
+    _sM.compose(P, _sq, _tmp.setScalar(fit)); root.updateMatrixWorld(true)
+    const anc = _latB.lengthSq() > 0 || caseAway > 0 ? _ancB.makeTranslation(_tmp.copy(_latB).negate().add(_lift.set(caseAway * 7, 0, 0))).multiply(root.matrixWorld) : null
+    model.setSheet(sheetK, _sM, anc, CP.kc)
   } else model.setSheet(0)
   root.updateMatrixWorld(true)
   updateWrap()
 
   // Hub teeth retract radially + button sinks when pressed
-  const pressE = easeIO(hubPress)
+  const pressE = hubPress
   btn.position.z = 0.012 - pressE * 0.014
   btnHit.position.z = btn.position.z
   for (const tooth of teeth) {
@@ -355,28 +379,18 @@ function tick() {
   // Disc placement
   root.updateMatrixWorld(true)
   seatWorld(_seat)
-  const e = easeIO(out)
-  // Path: seat → lift above hub → float to browse point
-  _lift.copy(_seat).add(new THREE.Vector3(0.05, 0.12, 0.35))
-  if (e < 0.35) {
-    // pop off hub
-    const k = e / 0.35
-    disc.position.lerpVectors(_seat, _lift, easeIO(k))
-    disc.rotation.set(-k * 0.15, k * 0.1, 0)
-  } else {
-    const k = (e - 0.35) / 0.65
-    disc.position.lerpVectors(_lift, FLOAT, easeIO(k))
-    if (discFocus) {
-      // gentle idle tumble so both label and data side can be inspected while orbiting
-      // subtle turntable idle spin about the disc's own axis + smooth flip between label and data side
-      if (!qs.has('shot') && !rot.dragging) discSpin += dt * 0.35
-      flip = step(flip, flipT, dt, 0.7)
-      disc.rotation.set(-0.42, easeIO(flip) * Math.PI, 0)
-      disc.rotateZ(discSpin)
-      disc.quaternion.premultiply(_rq); disc.position.add(rot.offset(FLOAT, _tmp))
-    } else {
-      disc.rotation.set(-0.35 - k * 0.2, 0.55 + k * 0.4, 0.15)
-    }
+  const e = out
+  // one continuous cubic Bézier: straight up off the hub, then on to the browse point (no stop between legs)
+  _lift.copy(_seat).add(_tmp.set(0.05, 0.12, 0.35)); _cub(_seat, _lift, _dock.copy(FLOAT).add(_tmp.set(0.03, 0.04, -0.3)), FLOAT, e, disc.position)
+  flip = mvb('flip', flip, flipT, 0.8, dt)
+  {
+    // travel pose (identity → tilted) blends into the focus pose (flip + idle spin) by the focus channel: no snap at hand-over
+    const k = THREE.MathUtils.smoothstep(e, 0.02, 1)
+    if (discFocus && !qs.has('shot') && !rot.dragging) discSpin += dt * 0.35
+    _qA.setFromEuler(_eA.set((-0.35 - k * 0.2) * k, (0.55 + k * 0.4) * k, 0.15 * k))
+    _qB.setFromEuler(_eA.set(-0.42, flip * Math.PI, 0)).multiply(_qC.setFromAxisAngle(_zAx, discSpin))
+    disc.quaternion.slerpQuaternions(_qA, _qB, discAway)
+    if (discFocus) { disc.quaternion.premultiply(_rq); disc.position.add(rot.offset(FLOAT, _tmp)) }
   }
   if (out < 0.01) {
     disc.position.copy(_seat)

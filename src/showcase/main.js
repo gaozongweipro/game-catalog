@@ -20,6 +20,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import { ItemRotator } from '../demo/itemRotate.js'
+import { Mover, Mover3, SOD3, sstep, BezierN } from '../demo/motion.js'
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
 import { LightProbeGridWebGL } from 'three/examples/jsm/lighting/LightProbeGridWebGL.js'
 import { loadBakedCabinet, bakedOnly } from './bakedCabinet.js'
@@ -109,8 +110,7 @@ let snapTimer = 0
 controls.addEventListener('end', () => { clearTimeout(snapTimer); if (mode === 'shelf') snapTimer = setTimeout(() => { if (mode === 'shelf') goCam(camShelfGoal()) }, 2600) })
 function applyLimits() {
   if (mode === 'shelf') {
-    const g = camShelfGoal(), sph = new THREE.Spherical().setFromVector3(g.p.clone().sub(g.t)), A = THREE.MathUtils.degToRad(15), P = THREE.MathUtils.degToRad(11)
-    Object.assign(controls, { minAzimuthAngle: sph.theta - A, maxAzimuthAngle: sph.theta + A, minPolarAngle: sph.phi - P, maxPolarAngle: Math.min(Math.PI / 2 - 0.05, sph.phi + P), minDistance: sph.radius * 0.5, maxDistance: sph.radius * 1.12, enablePan: true, rotateSpeed: 0.5 })
+    Object.assign(controls, shelfLimits(), { enablePan: true, rotateSpeed: 0.5 })
   } else Object.assign(controls, { minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity, minPolarAngle: 0.25, maxPolarAngle: Math.PI / 2 + 0.3, minDistance: 0.9, maxDistance: 9, enablePan: true, rotateSpeed: 1 })
 }
 const _pc = new THREE.Vector3()
@@ -526,100 +526,171 @@ function inspectPose() { const c = cabinetCenter(); INS.set(0, Math.min(c.y, 2.4
 
 // ---------------- state ----------------
 let mode = 'shelf' // shelf | fly | inspect | back | editor
-let sel = null, flyT = 0, flyFrom = null
+let sel = null
 let open = 0, openT = 0, hubP = 0, hubT = 0, out = 0, outT = 0, discFocus = false, flip = 0, flipT = 0, spin = 0, releaseArmed = false, reseating = false
 let pendingSheetOut = false, sFlip = 0, sFlipT = 0
 let dirty = 3, pending = null, sheetK = 0, sheetT = 0, rotObj = 'case', caseAway = 0, sheetDock = false, dockK = 0, pendingSheetIn = false
-// ---------------- return choreography ----------------
-// Put-back flows (disc / card → tray, cover → sleeve, lid, user rotation, fly to the shelf slot, doors) run as ONE timeline
-// of overlapping tracks instead of chained "wait until done, then reverse the next step" stages. Each track is a cubic
-// Hermite from the variable's current value AND current velocity to its goal (so a re-target mid-motion keeps momentum),
-// the user's arbitrary rotation is folded into a per-object "carry" quaternion that is slerped away concurrently (no
-// reset-first stage), and the case flies to its slot on a Bézier arc while the lid is still closing.
+// ---------------- motion (velocity-continuous) ----------------
+// Every animated quantity is a Mover: it carries value, velocity and acceleration, and every new goal is planned as a
+// minimum-jerk quintic that STARTS from the current value / velocity / acceleration (so re-targets, interruptions and
+// overlapping choreography never jump or stall) and lands with zero velocity and zero acceleration. Mechanism values
+// (lid, disc, sheet, doors…) are used raw — no second easing curve on top — so the speed profile is one smooth bell.
+// Flights (shelf ↔ inspect) follow ONE arc-length-parameterised Bézier from the current pose to the destination
+// (tangent = current velocity, no back-and-forth), the camera follows a vector quintic in the same window and, when
+// free, a critically damped second-order system. The user's arbitrary rotation is folded into per-object "carry"
+// quaternions whose weights glide to 0 concurrently (no reset-first stage).
 const RM = matchMedia('(prefers-reduced-motion: reduce)')
-const mkCarry = () => ({ q: new THREE.Quaternion(), off: new THREE.Vector3(), w: 0, w0: 0, dt: 0 })
+const DUR = (d) => (RM.matches ? Math.min(0.32, d * 0.4) : d)
+const mkCarry = () => ({ q: new THREE.Quaternion(), off: new THREE.Vector3(), w: 0 })
 const carry = { cCase: mkCarry(), cDisc: mkCarry(), cSheet: mkCarry() }, CARRY_OF = { case: 'cCase', disc: 'cDisc', sheet: 'cSheet' }
-let TL = null, retFly = 0, retCam = 0, retPath = null, camFrom = null, camTo = null
-const retQ1 = new THREE.Quaternion(), owned = new Set(), vel = {}, prevV = {}
+let flight = null, camTo = null, group = null, camScripted = false
 const VARS = {
   open: [() => open, (v) => (open = v)], out: [() => out, (v) => (out = v)], hubP: [() => hubP, (v) => (hubP = v)], sheetK: [() => sheetK, (v) => (sheetK = v)],
   dockK: [() => dockK, (v) => (dockK = v)], sFlip: [() => sFlip, (v) => (sFlip = v)], flip: [() => flip, (v) => (flip = v)], caseAway: [() => caseAway, (v) => (caseAway = v)],
-  door: [() => doorOpen, (v) => (doorOpen = v)], fly: [() => retFly, (v) => (retFly = v)], cam: [() => retCam, (v) => (retCam = v)],
+  door: [() => doorOpen, (v) => (doorOpen = v)], fly: [() => (flight ? flight.u : 0), (v) => { if (flight) flight.u = v }],
   cCase: [() => carry.cCase.w, (v) => (carry.cCase.w = v)], cDisc: [() => carry.cDisc.w, (v) => (carry.cDisc.w = v)], cSheet: [() => carry.cSheet.w, (v) => (carry.cSheet.w = v)],
 }
-const herm = (p0, p1, m0, s) => { const s2 = s * s, s3 = s2 * s; return (2 * s3 - 3 * s2 + 1) * p0 + (s3 - 2 * s2 + s) * m0 + (3 * s2 - 2 * s3) * p1 }
-const owns = (k) => !!TL && owned.has(k)
-/** spec: [key, to, startAt (s), duration (s)][] — tracks overlap freely; done() runs once the last one lands */
-function play(spec, done) {
-  const sc = RM.matches ? 0.45 : 1
-  const tracks = spec.map(([k, to, at, dur]) => { const a = VARS[k][0](), d = Math.max(0.05, dur * sc); return { k, a, b: to, at: at * sc, dur: d, m0: at === 0 ? (vel[k] || 0) * d : 0 } }).filter((x) => Math.abs(x.a - x.b) > 1e-5 || Math.abs(x.m0) > 1e-4)
-  owned.clear(); tracks.forEach((x) => owned.add(x.k))
-  TL = { t: 0, tracks, end: tracks.reduce((m, x) => Math.max(m, x.at + x.dur), 0), done }
+// free channels follow their flag; durations scale with the distance still to travel
+const GOALS = { open: () => openT, hubP: () => hubT, out: () => outT, sheetK: () => sheetT, sFlip: () => sFlipT, dockK: () => (sheetDock ? 1 : 0), flip: () => flipT,
+  caseAway: () => (discFocus ? 1 : 0), door: () => doorTarget, cCase: () => 0, cDisc: () => 0, cSheet: () => 0 }
+const BASE_D = { open: 0.95, hubP: 0.3, out: 1.1, sheetK: 2.5, sFlip: 0.85, dockK: 0.8, flip: 0.8, caseAway: 0.95, door: 0.95, cCase: 0.65, cDisc: 0.65, cSheet: 0.65 }
+const durFor = (k, d) => DUR(BASE_D[k] * (0.45 + 0.55 * Math.sqrt(Math.min(1, Math.abs(d)))))
+const MV = Object.fromEntries(Object.keys(VARS).map((k) => [k, new Mover(VARS[k][0]())]))
+const CLAMP01 = new Set(['open', 'out', 'hubP', 'sheetK', 'dockK', 'sFlip', 'flip', 'caseAway', 'door', 'fly', 'cCase', 'cDisc', 'cSheet'])
+const owns = (k) => MV[k].active
+function drive(dt) {
+  let moving = false
+  for (const k in MV) {
+    const m = MV[k], [get, set] = VARS[k], cur = get()
+    if (Math.abs(cur - (m._out ?? m.x)) > 1e-9) m.set(cur) // written from outside (reset, editor…) → adopt, at rest
+    const g = GOALS[k] && GOALS[k]()
+    if (g != null && (m.active ? Math.abs(m.goal - g) > 1e-9 : Math.abs(m.x - g) > 1e-9)) m.to(g, durFor(k, g - m.x))
+    if (m.step(dt)) moving = true
+    const v = CLAMP01.has(k) ? THREE.MathUtils.clamp(m.x, 0, 1) : m.x; m._out = v; set(v)
+  }
+  if (group && group.keys.every((k) => !MV[k].active) && !camScripted) { const d = group.done; group = null; d?.() }
+  return moving
 }
-function tlStep(dt) {
-  if (!TL) return false
-  TL.t += dt
-  for (const x of TL.tracks) { const s = THREE.MathUtils.clamp((TL.t - x.at) / x.dur, 0, 1); VARS[x.k][1](s >= 1 ? x.b : THREE.MathUtils.clamp(herm(x.a, x.b, x.m0, s), 0, 1)) }
-  if (TL.t >= TL.end) { const d = TL.done; TL = null; owned.clear(); d?.() }
-  return true
-}
-/** user took over mid-timeline: keep every value where it is; the per-variable stepping continues toward the (already set) goals */
-function interrupt() { if (!TL || mode !== 'inspect') return; TL = null; owned.clear(); for (const c of Object.values(carry)) { c.w0 = c.w; c.dt = 0 } }
+/** user took over: the running channels keep gliding to their (already updated) goals; only the completion hook is dropped */
+function interrupt() { if (group && mode === 'inspect') group = null }
 const carrySlerp = (c, out) => out.identity().slerp(c.q, c.w)
 const _cq = new THREE.Quaternion(), _cq2 = new THREE.Quaternion(), _cq3 = new THREE.Quaternion(), _co = new THREE.Vector3()
 /** fold the rotator's current rotation / zoom / pan into the active object's carry, then zero the rotator (no visual change) */
 function captureCarry() {
   if (rot.idle) return
   const c = carry[CARRY_OF[rotObj]], q = rot.quaternion(_cq), o = rot.offset(rotObj === 'disc' ? floatPoint() : INS, _co)
-  carrySlerp(c, _cq2); c.q.copy(q).multiply(_cq2); c.off.multiplyScalar(c.w).add(o); c.w = c.w0 = 1; c.dt = 0
+  carrySlerp(c, _cq2); c.q.copy(q).multiply(_cq2); c.off.multiplyScalar(c.w).add(o); c.w = 1
   rot.resetNow()
 }
-function relax() { if (['cCase', 'cDisc', 'cSheet'].some(owns)) interrupt(); captureCarry() } // "reset view": rotation eases out on its own
+function relax() { captureCarry() } // "reset view": the rotation glides out on its own
 function cubic(a, b, c, d, k, out) { const u = 1 - k; return out.set(0, 0, 0).addScaledVector(a, u * u * u).addScaledVector(b, 3 * u * u * k).addScaledVector(c, 3 * u * k * k).addScaledVector(d, k * k * k) }
-const _fp = new THREE.Vector3(), _fq = new THREE.Quaternion(), _qFront0 = new THREE.Quaternion()
-function flyPose(k, p, q) { retPath.getPoint(k, p); q.slerpQuaternions(_qFront0, retQ1, THREE.MathUtils.smoothstep(k, 0.05, 0.9)); return p }
+const _fp = new THREE.Vector3(), _fq = new THREE.Quaternion()
+/** pose of the case centre along the current flight (u = normalised arc length) */
+function flyPose(u, p, q) { const c = flight.path.getPoint(THREE.MathUtils.clamp(u, 0, 1)); p.copy(c); q.slerpQuaternions(flight.q0, flight.q1, sstep(0.02, 0.88, u)); return p }
+/** Plan one flight. segs: 'in' = Bézier from p0 (leaving along its current velocity v0, or `dir` from rest) to the slot
+ *  mouth `mouth`, then a straight slide into the slot `slot`; 'out' = straight slide out of the slot to `mouth`, then a
+ *  Bézier on to `p3` arriving along `arrive`. Tangent-continuous at the junction, arc-length parameterised. */
+function planFlight({ kind, p0, v0 = new THREE.Vector3(), dir, mouth, slot, p3, arrive, q0, q1, T, delay = 0 }) {
+  const path = new THREE.CurvePath(), sp = v0.length()
+  if (kind === 'in') {
+    const d0 = sp > 0.05 ? v0.clone().divideScalar(sp) : dir.clone().normalize(), inDir = mouth.clone().sub(slot).normalize()
+    const span = p0.distanceTo(mouth), h0 = Math.max(0.3 * span, sp * T / 4)
+    // last three control points on the slot axis → zero curvature where the arc meets the straight slide (no accel jump)
+    const b = new BezierN([p0, p0.clone().addScaledVector(d0, h0), mouth.clone().addScaledVector(inDir, 0.5 * span), mouth.clone().addScaledVector(inDir, 0.22 * span), mouth])
+    path.add(b); path.add(new THREE.LineCurve3(mouth.clone(), slot.clone()))
+  } else {
+    const outDir = mouth.clone().sub(p0).normalize(), span = mouth.distanceTo(p3)
+    const b = new BezierN([mouth, mouth.clone().addScaledVector(outDir, 0.2 * span), mouth.clone().addScaledVector(outDir, 0.45 * span), p3.clone().addScaledVector(arrive, -0.38 * span), p3])
+    path.add(new THREE.LineCurve3(p0.clone(), mouth.clone())); path.add(b)
+  }
+  const L = Math.max(1e-3, path.getLength())
+  flight = { path, q0: q0.clone(), q1: q1.clone(), u: 0, L, T }
+  const m = MV.fly; m.set(0); m.v = sp / L; m.to(1, T, delay)
+}
+/** scripted camera: vector quintic from the current camera position / target / velocity to `g` */
+const camMv = { p: new Mover3(), t: new Mover3() }, camVel = new THREE.Vector3(), tgtVel = new THREE.Vector3(), _camPrev = new THREE.Vector3(), _tgtPrev = new THREE.Vector3()
+function scriptCam(g, T, delay = 0) { camMv.p.set(camera.position, camVel); camMv.t.set(controls.target, tgtVel); camMv.p.to(g.p, T, delay); camMv.t.to(g.t, T, delay); camScripted = true; camGoal = g; auto = true }
 /** kind: 'disc' (put disc / card back) · 'close' (reseat + close lid) · 'sheet' (cover back; closes first if needed) · 'shelf' (everything + fly home) */
 function choreo(kind) {
-  TL = null; owned.clear(); captureCarry()
-  const T = [], P = (k, to, at, dur) => T.push([k, to, at, dur])
-  for (const k of ['cCase', 'cDisc', 'cSheet']) if (carry[k].w > 0) P(k, 0, 0, 0.55)
-  const discOut = out > 0.001 || !!outT || discFocus, isOpen = open > 0.001 || !!openT
-  let tDisc = 0, tLid = 0, tSheet = 0
-  if (discOut) { const d = 0.45 + 0.3 * out; P('out', 0, 0, d); P('flip', 0, 0, 0.42); P('caseAway', 0, 0, 0.6); P('hubP', 0, d * 0.78, 0.25); tDisc = d }
-  else if (hubP > 0) P('hubP', 0, 0, 0.28)
-  const sheetBack = (kind === 'sheet' || kind === 'shelf') && (sheetK > 0 || !!sheetT)
-  const close = isOpen && (kind === 'close' || kind === 'shelf' || (kind === 'sheet' && sheetK > 0))
-  if (close) { const a = discOut ? tDisc * 0.5 : 0, d = 0.38 + 0.27 * open; P('open', 0, a, d); tLid = a + d }
-  if (sheetBack) { const a = close ? Math.max(0, tLid - 0.22) : 0, d = 0.45 + 0.6 * sheetK; P('sFlip', 0, 0, 0.45); P('sheetK', 0, a, d); if (dockK > 0) P('dockK', 0, a, d * 0.7); if (caseAway > 0 && !discOut) P('caseAway', 0, a, d * 0.55); tSheet = a + d }
-  // flags describe the destination right away, so an interruption simply hands back to the per-variable stepping
+  captureCarry()
+  const keys = [], P = (k, to, at, dur) => { MV[k].to(to, DUR(dur), DUR(at)); keys.push(k) }
+  for (const k of ['cCase', 'cDisc', 'cSheet']) if (carry[k].w > 0) P(k, 0, 0, 0.7)
+  const discOut = out > 0.001 || !!outT || discFocus, isOpen = open > 0.001 || !!openT, shelf = kind === 'shelf'
+  let tDisc = 0, tLid = 0
+  if (discOut) { const d = 0.75 + 0.25 * out; P('out', 0, 0, d); P('flip', 0, 0, 0.7); if (!shelf) P('caseAway', 0, 0, 0.85); P('hubP', 0, d * 0.72, 0.32); tDisc = d }
+  else if (hubP > 0) P('hubP', 0, 0, 0.3)
+  const sheetBack = (kind === 'sheet' || shelf) && (sheetK > 0 || !!sheetT)
+  const close = isOpen && (kind === 'close' || shelf || (kind === 'sheet' && sheetK > 0))
+  if (close) { const a = discOut ? tDisc * 0.55 : 0, d = 0.62 + 0.3 * open; P('open', 0, a, d); tLid = a + d }
+  if (sheetBack) { const a = close ? Math.max(0, tLid - 0.4) : 0, d = 0.95 + 0.85 * sheetK; P('sFlip', 0, 0, 0.7); P('sheetK', 0, a, d); if (dockK > 0) P('dockK', 0, a, 0.8) }
+  // flags describe the destination right away, so an interruption simply re-targets the channels it touches
   discFocus = false; outT = 0; flipT = 0; reseating = false; releaseArmed = false; hubT = 0; sFlipT = 0; pendingSheetIn = false
   if (close) openT = 0
-  if (sheetBack) sheetT = 0
-  const settleSheet = () => { if (sheetBack) { sheetDock = false; dockK = 0 } }
-  if (kind === 'shelf') {
-    const m = proxies.get(sel.id), home = m.userData.home, rm = RM.matches
-    const slide = home.p.clone().add(new THREE.Vector3(0, 0.05, (viewMode === 'spine' ? 1.0 : 0.9) + 0.6))
-    // arc: a small anticipatory lift toward the viewer, sweep, then straight into the slot
-    retPath = new THREE.CubicBezierCurve3(INS.clone(), INS.clone().add(new THREE.Vector3(0, rm ? 0 : 0.16, rm ? 0 : 0.32)), slide, home.p.clone())
-    retQ1.setFromEuler(home.r); retFly = 0; retCam = 0
-    const fd = THREE.MathUtils.clamp(0.62 + 0.06 * retPath.getLength(), 0.75, 1.05), a = Math.max(0, tLid - 0.55, tSheet - 0.3)
-    camFrom = { p: camera.position.clone(), t: controls.target.clone() }; camTo = camShelfGoal()
-    { const sp = new THREE.Spherical().setFromVector3(camTo.p.clone().sub(camTo.t)); sp.phi = Math.min(sp.phi, Math.PI / 2 - 0.05); camTo.p.setFromSpherical(sp).add(camTo.t) } // land where the shelf OrbitControls limits will hold it (no drift after hand-over)
-    P('fly', 1, a, fd); P('cam', 1, a * 0.85, fd + 0.15); P('door', 0, a + fd - 0.35, 0.5)
+  if (sheetBack) { sheetT = 0; sheetDock = false }
+  if (shelf) {
+    const m = proxies.get(sel.id), home = m.userData.home
+    // ONE path from where the case is NOW (incl. its step-aside) to the slot: the step-aside offset is folded into the start
+    const p0 = INS.clone().add(caseOffset(_v)), v0 = caseVelW.clone()
+    MV.caseAway.set(0); caseAway = 0; flightAway = true
+    const mouth = home.p.clone().add(new THREE.Vector3(0, 0.05, viewMode === 'spine' ? 1.05 : 0.95))
+    const dir = mouth.clone().sub(p0).normalize().add(new THREE.Vector3(0, 0.55, 0)) // up and on toward the slot: no recoil toward the viewer
+    const T = DUR(THREE.MathUtils.clamp(1.4 + 0.05 * p0.distanceTo(home.p), 1.55, 1.95)), a = DUR(discOut ? 0.32 : sheetBack ? 0.4 : close ? 0.12 : 0)
+    planFlight({ kind: 'in', p0, v0, dir, mouth, slot: home.p, q0: holder.quaternion, q1: _q.setFromEuler(home.r), T, delay: a }); keys.push('fly')
+    camTo = shelfCamPose(camShelfGoal()); scriptCam(camTo, T + DUR(0.12), a * 0.6)
+    MV.door.to(0, DUR(0.95), a + T - DUR(0.5)); keys.push('door')
     doorTarget = 0; pendingSheetOut = false
     mode = 'return'; document.body.className = 'mode-shelf'; $('inspect').classList.add('hidden'); closeMenus()
-    play(T, () => { settleSheet(); finishReturn() })
-  } else play(T, () => { settleSheet(); syncInspectUI(); dirty = 3 })
+    group = { keys, done: finishReturn }
+  } else group = { keys, done: () => { syncInspectUI(); dirty = 3 } }
   syncInspectUI(); dirty = 3
 }
+let flightAway = false
+const caseVelW = new THREE.Vector3(), _cw = new THREE.Vector3(), _cwPrev = new THREE.Vector3()
+const _anc = new THREE.Matrix4(), _ancV = new THREE.Vector3()
+/** the case frame without its step-aside offset: the travelling sheet's path is anchored here, so the case moving out of
+ *  the way never drags the sheet (null = no offset, use the live frame) */
+function sheetAnchor(R) { sheetOffsets(_lat, _ancV); if (_ancV.lengthSq() === 0 && caseAway <= 0) return null; R.updateWorldMatrix(true, false); return _anc.makeTranslation(_ancV.negate().sub(awayVec(caseAway, _v2))).multiply(R.matrixWorld) }
+const awayVec = (a, out) => out.set(-3.6 * a, 0, -0.25 * a)
+// Cover pull-out: the CASE slides down off the sheet (relative motion = pure slide along the case's up axis, the sheet
+// stays where it is, in view) and, once the sheet's bottom edge has cleared the case top, curves away sideways / back
+// underneath it — one arc-length path keyed to the sheet's progress: straight drop, tangent-continuous Bézier turn.
+// The sheet unfolds only after the clear point (kc = drop length / path length), so the two can never meet.
+const _lat = new THREE.Vector3(), _ancV2 = new THREE.Vector3(), _dropP = new THREE.Vector3()
+let casePath = null
+function sheetCasePath() {
+  const S = model.sheetSlide
+  if (casePath && casePath.S === S) return casePath
+  const p = new THREE.CurvePath(), a = new THREE.Vector3(0, -S, 0), e = new THREE.Vector3(-2.7, -S - 0.3, -0.35)
+  const b = new BezierN([a, a.clone().add(new THREE.Vector3(0, -0.3, 0)), a.clone().add(new THREE.Vector3(0, -0.6, 0)), e.clone().add(new THREE.Vector3(1.5, 0, 0.12)), e])
+  p.add(new THREE.LineCurve3(new THREE.Vector3(), a.clone())); p.add(b); p.S = S; p.kc = S / p.getLength(); casePath = p; return p
+}
+/** [world offset of the case, its post-clear (lateral) part] for the current sheet progress */
+function sheetOffsets(off, lat) {
+  off.set(0, 0, 0); lat.set(0, 0, 0); if (flightAway || sheetK <= 0) return
+  const P = sheetCasePath(), f = 1 - dockK; off.copy(P.getPoint(Math.min(1, sheetK))).multiplyScalar(f)
+  lat.copy(off).sub(_dropP.set(0, -P.S * Math.min(1, sheetK / P.kc) * f, 0))
+}
+/** full world offset of the case from its inspect pose (disc step-aside + cover slide-off) */
+function caseOffset(out) { sheetOffsets(_lat, _ancV2); return awayVec(caseAway, out).add(_lat) }
+const awayNow = () => (sheetK > 0 && !flightAway ? Math.max(caseAway, 1 - dockK) : caseAway)
+// decal / wall shadow of the flying proxy fade in during the last stretch instead of popping on
+const _fadeMats = new Map()
+function shelfShadows(m, f) {
+  for (const key of ['decal', 'wall']) {
+    const d = m.userData[key]; if (!d) continue
+    if (f >= 1) { const o = _fadeMats.get(d); if (o) { d.material = o.base; _fadeMats.delete(d) } d.visible = true; continue }
+    let o = _fadeMats.get(d); if (!o || o.base !== d.material && o.mat !== d.material) { o = { base: d.material, mat: d.material.clone() }; _fadeMats.set(d, o) }
+    d.material = o.mat; o.mat.opacity = o.base.opacity * f; d.visible = f > 0.001
+  }
+}
 function swapToProxy() { // exactly one case: the shelf proxy takes over in the same frame, at the same pose
-  const m = proxies.get(sel.id); flyPose(retFly, _fp, _fq); m.position.copy(_fp); m.quaternion.copy(_fq); m.scale.setScalar(1)
+  const m = proxies.get(sel.id); flyPose(flight.u, _fp, _fq); m.position.copy(_fp); m.quaternion.copy(_fq); m.scale.setScalar(1)
   holder.visible = false; model.disc.visible = false; m.visible = true; mode = 'back'
 }
 function finishReturn() {
   if (mode === 'return') swapToProxy()
-  const m = proxies.get(sel.id); m.position.copy(m.userData.home.p); m.quaternion.setFromEuler(m.userData.home.r); m.userData.decal.visible = true; if (m.userData.wall) m.userData.wall.visible = true
-  retPath = null; setMode('shelf'); doorTarget = 0; sel = null; goCam(camShelfGoal())
+  const m = proxies.get(sel.id); m.position.copy(m.userData.home.p); m.quaternion.setFromEuler(m.userData.home.r); shelfShadows(m, 1)
+  flight = null; flightAway = false; setMode('shelf'); doorTarget = 0; sel = null; camGoal = camShelfGoal(); auto = true; camSod.reset(camera.position, controls.target)
 }
 const DOCK_OFF = new THREE.Vector3(-1.55, 0.62, -0.7), _dockP = new THREE.Vector3(), _cp = new THREE.Vector3(), _F = new THREE.Vector3()
 function inspCam(out) { const d = mobile && innerWidth < innerHeight ? 5.2 : 4.0; return out.copy(INS).add(_v2.set(0.75, 0.42, d)) }
@@ -638,21 +709,48 @@ function camInspectGoal() {
 }
 const floatPoint = () => INS.clone().lerp(camInspectGoal().p, model.kind === 'cart' ? 0.5 : 0.4)
 let camGoal = null
-function goCam(g) { camGoal = g; auto = true }
+function goCam(g) { if (!auto || !camSod.live) camSod.reset(camera.position, controls.target, camVel, tgtVel); camGoal = g; auto = true }
+// free-camera follower: critically damped second-order dynamics on position and target (velocity carries over)
+const camSod = {
+  live: false, p: null, t: null,
+  reset(p, t, vp = null, vt = null) { if (!this.p) { this.p = new SOD3(1.15, 1, 0, p); this.t = new SOD3(1.15, 1, 0, t) } this.p.reset(p, vp); this.t.reset(t, vt); this.live = true },
+  follow(dt, g) {
+    if (!this.live) this.reset(camera.position, controls.target)
+    camera.position.copy(this.p.update(dt, g.p)); controls.target.copy(this.t.update(dt, g.t))
+    if (camera.position.distanceToSquared(g.p) < 4e-8 && controls.target.distanceToSquared(g.t) < 4e-8 && this.p.yd.lengthSq() < 1e-6 && this.t.yd.lengthSq() < 1e-6) {
+      camera.position.copy(g.p); controls.target.copy(g.t); this.p.reset(g.p); this.t.reset(g.t); return false }
+    return true
+  },
+}
+function shelfLimits() {
+  const g = camShelfGoal(), sph = new THREE.Spherical().setFromVector3(g.p.clone().sub(g.t)), A = THREE.MathUtils.degToRad(15), P = THREE.MathUtils.degToRad(11)
+  return { minAzimuthAngle: sph.theta - A, maxAzimuthAngle: sph.theta + A, minPolarAngle: sph.phi - P, maxPolarAngle: Math.min(Math.PI / 2 - 0.05, sph.phi + P), minDistance: sph.radius * 0.5, maxDistance: sph.radius * 1.12 }
+}
+const _par = new THREE.Vector3(), _sph = new THREE.Spherical()
+/** where the shelf camera actually rests: goal + pointer parallax, already inside the shelf OrbitControls limits */
+function shelfCamPose(g) {
+  const L = shelfLimits(), p = _par.copy(g.p); if (!qs.has('shot')) p.add(_v2.set(par.x * 0.5, -par.y * 0.3, 0))
+  _sph.setFromVector3(p.sub(g.t)); _sph.phi = THREE.MathUtils.clamp(_sph.phi, L.minPolarAngle, L.maxPolarAngle); _sph.theta = THREE.MathUtils.clamp(_sph.theta, L.minAzimuthAngle, L.maxAzimuthAngle); _sph.radius = THREE.MathUtils.clamp(_sph.radius, L.minDistance, L.maxDistance)
+  return { p: new THREE.Vector3().setFromSpherical(_sph).add(g.t), t: g.t.clone() }
+}
 
 async function selectEntry(id) {
   if (mode !== 'shelf') return
   const m = proxies.get(id); if (!m) return
   sel = entries.find((e) => e.id === id); inspectPose()
-  flyFrom = { p: m.position.clone(), q: m.quaternion.clone() }; flyT = 0; mode = 'fly'; document.body.className = 'mode-inspect'; doorTarget = 1
+  mode = 'fly'; document.body.className = 'mode-inspect'; doorTarget = 1
   $('empty').classList.add('hidden'); useModel(sel.platform); pending = getArt(sel).then((art) => model.setArt(art))
-  goCam(camInspectGoal())
+  // one arc: straight out of the slot toward the viewer, on to the inspect point, arriving from slightly behind / above
+  const home = m.userData.home, slideOut = home.p.clone().add(new THREE.Vector3(0, 0.05, viewMode === 'spine' ? 1.0 : 0.9))
+  const T = DUR(THREE.MathUtils.clamp(1.35 + 0.05 * home.p.distanceTo(INS), 1.5, 1.85))
+  planFlight({ kind: 'out', p0: m.position, mouth: slideOut, p3: INS, arrive: new THREE.Vector3(0, -0.15, 1).normalize(), q0: m.quaternion, q1: qFront, T })
+  scriptCam(camInspectGoal(), T + DUR(0.1))
 }
 async function finishFly() {
   await pending; const m = proxies.get(sel.id)
   holder.position.copy(INS).sub(new THREE.Vector3(0, Hm() / 2, 0)); holder.rotation.set(0, 0, 0); holder.visible = true; model.disc.visible = true
   open = openT = hubP = hubT = out = outT = 0; discFocus = false; flip = flipT = 0
-  model.pose(0, 0); m.visible = false; setMode('inspect'); goCam(camInspectGoal())
+  model.pose(0, 0); m.visible = false; flight = null; setMode('inspect'); goCam(camInspectGoal())
 }
 function backToShelf() { if (mode === 'inspect' && sel) choreo('shelf') }
 function pressHub() { if (mode !== 'inspect' || open < 0.65 || outT || (sheetK > 0 && !sheetDock)) return; relax(); reseating = false; releaseArmed = false; hubT = 1; syncInspectUI() }
@@ -688,7 +786,7 @@ cv.addEventListener('pointerup', (e) => {
     for (let p = o; p; p = p.parent) { if (p === model.hub || p.name === 'hubBtn') isHub = true; if (p === model.disc) isDisc = true }
     if (discFocus) return
     if ((isHub || isDisc) && open > 0.65) pressHub()
-    else if (!openT && !outT && !TL && (sheetK <= 0 || (sheetDock && sheetK >= 1))) { relax(); openT = 1; syncInspectUI() }
+    else if (!openT && !outT && !group && (sheetK <= 0 || (sheetDock && sheetK >= 1))) { relax(); openT = 1; syncInspectUI() }
   }
 })
 
@@ -702,10 +800,10 @@ const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _seat = new THREE.V
 function bez(a, b, c, k, out) { const u = 1 - k; return out.set(0, 0, 0).addScaledVector(a, u * u).addScaledVector(b, 2 * u * k).addScaledVector(c, k * k) }
 let simT = 0, forceDt = 0
 function tick() {
-  const dt = forceDt || Math.min(clock.getDelta(), 0.05); simT += dt; let busy = tlStep(dt)
+  const dt = forceDt || Math.min(clock.getDelta(), 0.05); simT += dt; let busy = drive(dt)
   // doors
-  const d0 = doorOpen; if (!owns('door')) doorOpen = step(doorOpen, doorTarget, dt, 0.8); if (d0 !== doorOpen) busy = true
-  doors.forEach((p) => (p.rotation.y = p.userData.ci === page ? p.userData.sx * ease(doorOpen) * THREE.MathUtils.degToRad(105) : 0))
+  if (owns('door')) busy = true
+  doors.forEach((p) => (p.rotation.y = p.userData.ci === page ? p.userData.sx * doorOpen * THREE.MathUtils.degToRad(105) : 0))
   streamTick()
   // shelf glides / pops
   for (const m of proxies.values()) {
@@ -713,64 +811,60 @@ function tick() {
     if (m.userData.pop != null) { m.userData.pop = Math.min(1, m.userData.pop + dt / 0.55); const k = m.userData.pop; m.scale.setScalar(Math.max(0.001, 1 + Math.sin(k * Math.PI) * 0.06 - (1 - ease(k)) * 1)); if (k >= 1) { m.scale.setScalar(1); delete m.userData.pop } busy = true }
   }
   // fly out / back
-  if (mode === 'back' && retPath && sel) { // second half of the return: the shelf proxy continues on the same arc
-    busy = true; const m = proxies.get(sel.id); flyPose(retFly, _fp, _fq); m.position.copy(_fp); m.quaternion.copy(_fq)
-    m.userData.decal.visible = retFly > 0.94; if (m.userData.wall) m.userData.wall.visible = m.userData.decal.visible
-  } else if (mode === 'fly') {
-    busy = true; flyT = Math.min(1, flyT + dt / 1.15); const m = proxies.get(sel.id), k = ease(flyT)
-    m.userData.decal.visible = false // the contact shadow only exists while the case sits on the shelf
-    if (m.userData.wall) m.userData.wall.visible = m.userData.decal.visible
-    const home = m.userData.home, slideOut = home.p.clone().add(new THREE.Vector3(0, 0.05, viewMode === 'spine' ? 1.0 : 0.9))
-    if (mode === 'fly') { bez(flyFrom.p, slideOut.clone().add(new THREE.Vector3(0, 0, 0.6)), INS, k, m.position); m.quaternion.slerpQuaternions(flyFrom.q, qFront, Math.min(1, k * 1.2)); if (flyT >= 1) finishFly() }
+  if (mode === 'back' && flight && sel) { // second half of the return: the shelf proxy continues on the same arc
+    busy = true; const m = proxies.get(sel.id); flyPose(flight.u, _fp, _fq); m.position.copy(_fp); m.quaternion.copy(_fq)
+    shelfShadows(m, sstep(0.86, 1, flight.u))
+  } else if (mode === 'fly' && flight) {
+    busy = true; const m = proxies.get(sel.id)
+    shelfShadows(m, 1 - sstep(0, 0.1, flight.u)) // the contact shadow only exists while the case sits on the shelf
+    flyPose(flight.u, m.position, m.quaternion); if (!owns('fly') && !tick._ff) { tick._ff = true; finishFly().finally(() => (tick._ff = false)) }
   }
   // inspect state machine
   if (mode === 'inspect' || mode === 'editor' || mode === 'return') {
     const o0 = open, h0 = hubP, u0 = out
-    if (!owns('open')) open = step(open, openT, dt, 0.9); if (!owns('hubP')) hubP = step(hubP, hubT, dt, 0.28)
     if (hubT === 1 && hubP > 0.92 && !outT && !releaseArmed) { releaseArmed = true; outT = 1 }
-    if (!owns('out')) out = step(out, outT, dt, 1.0)
     if (reseating && out < 0.01) { reseating = false; hubT = 0 }
     if (outT === 1 && out > 0.92 && !discFocus) { discFocus = true; syncInspectUI(); goCam(camInspectGoal()) }
-    if (!owns('sheetK')) sheetK = step(sheetK, sheetT, dt, 2.2); if (sheetK !== tick._sk) { tick._sk = sheetK; busy = true; if (sheetK === 0 || sheetK === 1) syncInspectUI() }
-    if (!TL && sheetDock && sheetK <= 0 && !sheetT) sheetDock = false
+    if (sheetK !== tick._sk) { tick._sk = sheetK; busy = true; if (sheetK === 0 || sheetK === 1) syncInspectUI() }
+    if (!group && sheetDock && sheetK <= 0 && !sheetT) sheetDock = false
     // cover requested while the case was open / disc out: the case closes (disc reseated) first, then the sheet slides out
-    if (pendingSheetOut && !TL && open < 0.01 && !openT && out < 0.01 && !outT && !hubT && hubP < 0.01) { pendingSheetOut = false; sheetDock = false; sheetT = 1; sFlipT = 0; rot.reset(); syncInspectUI() }
-    const sf0 = sFlip; if (!owns('sFlip')) sFlip = step(sFlip, sFlipT, dt, 0.7); if (sf0 !== sFlip) busy = true
-    const dk0 = dockK; if (!owns('dockK')) dockK = step(dockK, sheetDock ? 1 : 0, dt, 0.7); if (dk0 !== dockK) busy = true
+    // starts while the lid is still finishing its close (the sleeve-bound sheet follows the hinge), so there is no stop between the two
+    if (pendingSheetOut && open < 0.25 && !openT && out < 0.01 && !outT && !hubT && hubP < 0.05) { pendingSheetOut = false; sheetDock = false; sheetT = 1; sFlipT = 0; rot.reset(); syncInspectUI() }
     if (o0 !== open || h0 !== hubP || u0 !== out || discFocus) busy = true
     if ((o0 > 0.4) !== (open > 0.4) && auto && mode !== 'return') goCam(camInspectGoal())
     // ---- item transforms (camera fixed): active object gets the user's rotation / zoom / pan
     if (mode === 'inspect') { if (rot.update(dt)) busy = true } else rot.resetNow()
-    const act = discFocus ? 'disc' : sheetK > 0.34 && !sheetDock ? 'sheet' : 'case'
+    const act = discFocus ? 'disc' : sheetK > sheetCasePath().kc && !sheetDock ? 'sheet' : 'case'
     if (act !== rotObj) { captureCarry(); rotObj = act } // the old object's rotation eases out instead of snapping
-    for (const [k, c] of Object.entries(carry)) if (c.w > 0 && !owns(k)) { c.dt += dt; const s = Math.min(1, c.dt / (RM.matches ? 0.25 : 0.55)); c.w = s >= 1 ? 0 : c.w0 * (1 - s * s * (3 - 2 * s)); busy = true }
     rot.quaternion(_rq)
     // the case steps aside while the flat sheet (undocked) or the disc is presented
-    const awayT = discFocus ? 1 : sheetDock ? 0 : THREE.MathUtils.smoothstep(sheetK, 0.4, 0.9), a0 = caseAway
-    if (!owns('caseAway')) caseAway += (awayT - caseAway) * (1 - Math.exp(-dt * 6)); if (Math.abs(awayT - caseAway) < 1e-4) caseAway = awayT; if (a0 !== caseAway) busy = true
-    const R = model.root, oe = ease(open)
-    if (mode === 'return' && retPath) { flyPose(retFly, _fp, _fq); holder.quaternion.copy(_fq); holder.position.copy(_fp).sub(_v.set(0, Hm() / 2, 0).applyQuaternion(_fq)) }
+    // (disc focus: caseAway channel; sheet: keyed to the sheet's own progress so the case only starts to move once the
+    // sheet's bottom edge has cleared the case top, and is back home before the sheet re-enters the sleeve)
+    const away = awayNow(); if (away > 0) busy = true
+    const R = model.root, oe = open
+    if ((mode === 'return' || mode === 'back') && flight) { flyPose(flight.u, _fp, _fq); holder.quaternion.copy(_fq); holder.position.copy(_fp).sub(_v.set(0, Hm() / 2, 0).applyQuaternion(_fq)) }
     else { holder.position.copy(INS).sub(_v.set(0, Hm() / 2, 0)); holder.rotation.set(0, 0, 0) }
     const cC = carry.cCase
     R.quaternion.copy(act === 'case' ? _rq : _q.identity()); if (cC.w > 0) R.quaternion.multiply(carrySlerp(cC, _cq3))
-    R.position.set(0, Hm() / 2 + 0.0005, 0).add(act === 'case' ? rot.offset(INS, _v) : _v.set(0, 0, 0)).addScaledVector(cC.off, cC.w).sub(_v.set(-0.62 * oe, 0, 0).applyQuaternion(R.quaternion)).add(_v.set(-3.6 * caseAway, 0, 0))
+    R.position.set(0, Hm() / 2, 0).add(act === 'case' ? rot.offset(INS, _v) : _v.set(0, 0, 0)).addScaledVector(cC.off, cC.w).sub(_v.set(-0.62 * oe, 0, 0).applyQuaternion(R.quaternion)).add(caseOffset(_v))
     if (sheetK > 0) { // flat sheet presented square to the camera, scaled to fit the view
-      const cp = inspCam(_cp), P = _sp.copy(INS).lerp(_dockP.copy(INS).add(DOCK_OFF), ease(dockK)); if (act === 'sheet') P.add(rot.offset(INS, _v)); P.addScaledVector(carry.cSheet.off, carry.cSheet.w)
+      const cp = inspCam(_cp), P = _sp.copy(INS).lerp(_dockP.copy(INS).add(DOCK_OFF), dockK); if (act === 'sheet') P.add(rot.offset(INS, _v)); P.addScaledVector(carry.cSheet.off, carry.cSheet.w)
       const dist = cp.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
-      const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.7 * vh) / model.sheetSize.h) * (1 - 0.62 * ease(dockK)) // docked: small, upper-left, out of the way
-      _sM.lookAt(cp, P, _up); _q.setFromRotationMatrix(_sM).multiply(_qY180); if (sFlip > 0) _q.multiply(_q2.setFromAxisAngle(_up, ease(sFlip) * Math.PI)); if (act === 'sheet') _q.premultiply(_rq); if (carry.cSheet.w > 0) _q.premultiply(carrySlerp(carry.cSheet, _cq3))
-      _sM.compose(P, _q, _v.setScalar(fit)); model.setSheet(sheetK, _sM)
+      const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.7 * vh) / model.sheetSize.h) * (1 - 0.62 * dockK) // docked: small, upper-left, out of the way
+      _sM.lookAt(cp, P, _up); _q.setFromRotationMatrix(_sM).multiply(_qY180); if (sFlip > 0) _q.multiply(_q2.setFromAxisAngle(_up, sFlip * Math.PI)); if (act === 'sheet') _q.premultiply(_rq); if (carry.cSheet.w > 0) _q.premultiply(carrySlerp(carry.cSheet, _cq3))
+      _sM.compose(P, _q, _v.setScalar(fit)); model.setSheet(sheetK, _sM, sheetAnchor(R), sheetCasePath().kc)
     } else model.setSheet(0)
-    holder.updateMatrixWorld(true); model.pose(open, hubP)
+    holder.updateMatrixWorld(true); model.pose(open, hubP, true)
+    { R.getWorldPosition(_cw); if (dt > 0 && tick._cwOk) caseVelW.copy(_cw).sub(_cwPrev).divideScalar(dt); _cwPrev.copy(_cw); tick._cwOk = true }
     holder.updateMatrixWorld(true); model.seatWorld(_seat)
-    const e = ease(out), F = _F.copy(INS).lerp(inspCam(_cp), model.kind === 'cart' ? 0.5 : 0.4)
+    const e = out, F = _F.copy(INS).lerp(inspCam(_cp), model.kind === 'cart' ? 0.5 : 0.4)
     const isCart = model.kind === 'cart'; model.disc.scale.setScalar(isCart ? 1 + 1.8 * THREE.MathUtils.smoothstep(e, 0.3, 1) : 1)
-    if (discFocus) { if (!owns('flip')) flip = step(flip, flipT, dt, 0.7); if (!qs.has('shot') && (isCart || !rot.dragging)) spin += dt * (isCart ? 0.6 : 0.35) }
+    if (discFocus) { if (!qs.has('shot') && (isCart || !rot.dragging)) spin += dt * (isCart ? 0.6 : 0.35) }
     if (out < 0.001) { model.disc.position.copy(_seat); R.getWorldQuaternion(model.disc.quaternion); spin = 0 }
     else {
       // one continuous cubic Bézier: straight up / out of the tray, then on to the presentation point (was two eased legs with a stop between)
       _lift.copy(_seat).add(_v.set(0.04, 0.11, 0.4)); _b2.copy(F).add(_v.set(0.03, 0.04, -0.3)); cubic(_seat, _lift, _b2, F, e, model.disc.position)
-      R.getWorldQuaternion(_qs); _qp.setFromEuler(_eu.set(isCart ? -0.18 : -0.3, ease(flip) * Math.PI + (isCart ? Math.sin(spin) * 0.3 : 0), 0)); if (!isCart) _qp.multiply(_q2.setFromAxisAngle(_Z, spin))
+      R.getWorldQuaternion(_qs); _qp.setFromEuler(_eu.set(isCart ? -0.18 : -0.3, flip * Math.PI + (isCart ? Math.sin(spin) * 0.3 : 0), 0)); if (!isCart) _qp.multiply(_q2.setFromAxisAngle(_Z, spin))
       model.disc.quaternion.slerpQuaternions(_qs, _qp, THREE.MathUtils.smoothstep(e, 0.04, 0.8))
       const cD = carry.cDisc; if (cD.w > 0) { model.disc.quaternion.premultiply(carrySlerp(cD, _cq3)); model.disc.position.addScaledVector(cD.off, cD.w) }
       if (act === 'disc') { model.disc.quaternion.premultiply(_rq); model.disc.position.add(rot.offset(F, _v)) }
@@ -778,19 +872,20 @@ function tick() {
     if (mode !== 'back') holder.visible = true // the case is moved aside (caseAway) instead of hidden, so a docked sheet stays visible
     const ui = `${open > 0.65}|${open > 0.5}|${openT}|${outT}|${hubT}|${discFocus}|${sheetDock}|${sheetK > 0}|${rot.idle}|${pendingSheetOut}`; if (ui !== tick._ui) { tick._ui = ui; syncInspectUI() }
     // hand-over to the shelf proxy is decided last so nothing later in this frame can re-show the inspect model (duplicate-case guard)
-    if (mode === 'return' && open === 0 && out === 0 && sheetK <= 0 && hubP < 1e-3 && caseAway < 1e-3 && !carry.cCase.w && !carry.cDisc.w && !carry.cSheet.w) swapToProxy()
+    if (mode === 'return' && open === 0 && out === 0 && sheetK <= 0 && hubP < 1e-3 && !carry.cCase.w && !carry.cDisc.w && !carry.cSheet.w) swapToProxy()
   }
   // camera
-  if (owns('cam')) { camera.position.lerpVectors(camFrom.p, camTo.p, retCam); controls.target.lerpVectors(camFrom.t, camTo.t, retCam); busy = true }
-  else if (auto && camGoal) {
-    const k = 1 - Math.exp(-dt * 3.2)
-    if (mode === 'shelf' && !qs.has('shot')) { _v.copy(camGoal.p).add(new THREE.Vector3(par.x * 0.5, -par.y * 0.3, 0)); camera.position.lerp(_v, k) } else camera.position.lerp(camGoal.p, k); controls.target.lerp(camGoal.t, k)
-    if (camera.position.distanceTo(camGoal.p) > 0.004) busy = true
+  if (camScripted) {
+    camMv.p.step(dt); camMv.t.step(dt); camMv.p.get(camera.position); camMv.t.get(controls.target); busy = true
+    if (!camMv.p.active && !camMv.t.active) { camScripted = false; camSod.reset(camera.position, controls.target) }
+  } else if (auto && camGoal) { // free camera: critically damped second-order follow (velocity-continuous, no exponential snap)
+    const g = mode === 'shelf' ? shelfCamPose(camGoal) : camGoal
+    if (camSod.follow(dt, g)) busy = true
   }
+  if (dt > 0) { camVel.copy(camera.position).sub(_camPrev).divideScalar(dt); tgtVel.copy(controls.target).sub(_tgtPrev).divideScalar(dt) } _camPrev.copy(camera.position); _tgtPrev.copy(controls.target)
   controls.enabled = mode === 'shelf'; rot.enabled = mode === 'inspect'
   if (vignette) { const vt = mode === 'inspect' ? 0.52 : 0.32, u = vignette.uniforms.uAmt; if (Math.abs(u.value - vt) > 0.002) { u.value += (vt - u.value) * (1 - Math.exp(-dt * 5)); busy = true } }
-  const changed = owns('cam') ? false : controls.update() // OrbitControls would clamp the scripted camera to the inspect limits
-  for (const k in VARS) { const v = VARS[k][0](); vel[k] = dt > 0 && k in prevV ? (v - prevV[k]) / dt : 0; prevV[k] = v }
+  const changed = camScripted || (auto && camGoal) ? false : controls.update() // scripted / auto camera: OrbitControls must not damp or clamp it
   interactionLOD(mode === 'inspect' && (rot.active || busy), dt)
   if (window.__rec) window.__rec.push(window.__sc.probe())
   if (busy || changed || dirty > 0) { const t0 = performance.now(); draw(); perfSample(performance.now() - t0, dt); dirty = Math.max(0, dirty - 1) }
@@ -988,7 +1083,7 @@ function setPlatform(p) {
 $('fKey').onchange = () => { draft.keyCard = $('fKey').checked; scheduleArt() }
 function openEditor(entry) {
   if (mode === 'return' || mode === 'back' || mode === 'fly') return
-  TL = null; owned.clear(); retPath = null; for (const c of Object.values(carry)) c.w = 0
+  group = null; flight = null; for (const c of Object.values(carry)) c.w = 0
   closeMenus(); draftDirty = false; prevMode = mode; prevSel = sel
   editing = entry || { id: null }
   draft = entry ? JSON.parse(JSON.stringify({ ...entry, slots: Object.fromEntries(Object.entries(entry.slots || {}).map(([k, v]) => [k, { crop: v.crop }])) })) : { title: '', platform: 'ps5', band: true, slots: {} }
@@ -1302,9 +1397,31 @@ async function boot() {
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { stepFrame: (d = 1 / 30) => { renderer.setAnimationLoop(null); forceDt = d; tick(); forceDt = 0; return mode }, resume: () => { clock.getDelta(); renderer.setAnimationLoop(tick) }, cg: () => ({ goal: camShelfGoal().p.toArray(), cam: camera.position.toArray(), tgt: controls.target.toArray(), gt: camShelfGoal().t.toArray(), to: camTo && camTo.p.toArray() }), probe: () => { const p = sel && proxies.get(sel.id), c = new THREE.Vector3(), q = new THREE.Quaternion(); if (holder.visible) { model.root.getWorldPosition(c); model.root.getWorldQuaternion(q) } else if (p) { c.copy(p.position); q.copy(p.quaternion) } const d = model.disc.getWorldPosition(new THREE.Vector3()); return { t: +simT.toFixed(4), mode, hv: holder.visible, pv: p ? p.visible : null, c: c.toArray(), q: q.toArray(), d: d.toArray(), cam: camera.position.toArray(), open, out, sk: sheetK, door: doorOpen, hub: hubP } }, vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, glb: () => model.glbParts,
+  window.__sc = { stepFrame: (d = 1 / 30) => { renderer.setAnimationLoop(null); forceDt = d; tick(); forceDt = 0; return mode }, resume: () => { clock.getDelta(); renderer.setAnimationLoop(tick) }, cg: () => ({ goal: camShelfGoal().p.toArray(), cam: camera.position.toArray(), tgt: controls.target.toArray(), gt: camShelfGoal().t.toArray(), to: camTo && camTo.p.toArray() }), probe: () => { const p = sel && proxies.get(sel.id), c = new THREE.Vector3(), q = new THREE.Quaternion(); if (holder.visible) { model.root.getWorldPosition(c); model.root.getWorldQuaternion(q) } else if (p) { c.copy(p.position); q.copy(p.quaternion) } const d = model.disc.getWorldPosition(new THREE.Vector3()); return { t: +simT.toFixed(4), mode, hv: holder.visible, pv: p ? p.visible : null, c: c.toArray(), q: q.toArray(), d: d.toArray(), cam: camera.position.toArray(), tg: controls.target.toArray(), ps: p ? p.scale.x : null, dec: p ? p.userData.decal.visible : null, ao: gtao ? gtao.enabled : null, sau: renderer.shadowMap.autoUpdate, lod: lodOn, lodDpr, tier, open, out, sk: sheetK, door: doorOpen, hub: hubP } }, vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, glb: () => model.glbParts,
     // debug: visible meshes (outside the disc group) whose world bounds come within r of the presented disc
     near: (r = 0.9) => { const c = model.disc.getWorldPosition(new THREE.Vector3()), out = [], bs = new THREE.Sphere(); scene.traverseVisible((o) => { if (!o.isMesh) return; for (let p = o; p; p = p.parent) if (p === model.disc) return; if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); bs.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld); const d = bs.center.distanceTo(c) - bs.radius; if (d < r) { let path = o.name || o.type; for (let p = o.parent; p && p !== scene; p = p.parent) path = (p.name || 'g') + '/' + path; out.push([+d.toFixed(2), path, o.material?.name || o.material?.type]) } }); return out.sort((a, b) => a[0] - b[0]).slice(0, 30) }, door: (v) => { doorTarget = v; dirty = 3 }, env: (p) => { if (p && PRESETS[p]) { env = envDefaults(p); applyEnv(false); renderEnvUI() } return { ...env, split: !!BAKED?.split } }, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+  // debug: sheet ⟂ shell intersection test. Sheet print faces are sampled on a grid; every grid edge is ray-cast against the
+  // shell meshes (crossing = the paper passes through plastic), and every sample casts along ±normal: if the first plastic
+  // face it meets is a back face, the sample sits INSIDE the plastic wall.
+  const _dbl = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), _rc = new THREE.Raycaster()
+  window.__sc.dims = () => { model.root.updateMatrixWorld(true); const inv = model.root.matrixWorld.clone().invert(), out = {}; model.root.traverse((o) => { if (o.isMesh && o.material === model.shellMat && o.visible) { const b = new THREE.Box3().setFromObject(o, true).applyMatrix4(inv); out[o.name || o.geometry.type + o.id] = [b.min.toArray().map((v) => +v.toFixed(4)), b.max.toArray().map((v) => +v.toFixed(4))] } }); return { W: model.W, H: model.H, D: model.D, HALF: model.HALF, out } }
+  window.__sc.clip = (rows = 9) => {
+    scene.updateMatrixWorld(true)
+    const shells = []; model.root.traverse((o) => { if (o.isMesh && o.material === model.shellMat && o.visible) { let v = true; for (let p = o; p; p = p.parent) if (!p.visible) v = false; if (v) { const m = new THREE.Mesh(o.geometry, _dbl); m.matrixWorld.copy(o.matrixWorld); m.matrixAutoUpdate = false; shells.push(m) } } })
+    let cross = 0, inside = 0, n = 0, minClear = 1e9; const hits = []
+    for (const sm of model.sheetMeshes) {
+      const pos = sm.geometry.attributes.position, nor = sm.geometry.attributes.normal, cols = pos.count / 2, G = []
+      for (let i = 0; i < cols; i++) { const a = new THREE.Vector3().fromBufferAttribute(pos, i * 2).applyMatrix4(sm.matrixWorld), b = new THREE.Vector3().fromBufferAttribute(pos, i * 2 + 1).applyMatrix4(sm.matrixWorld), nn = new THREE.Vector3().fromBufferAttribute(nor, i * 2).transformDirection(sm.matrixWorld); G.push([]); for (let r = 0; r < rows; r++) G[i].push([a.clone().lerp(b, r / (rows - 1)), nn]) }
+      const seg = (p, q) => { const d = q.clone().sub(p), L = d.length(); if (L < 1e-6) return; _rc.set(p, d.divideScalar(L)); _rc.far = L; for (const m of shells) { const h = _rc.intersectObject(m, false); if (h.length) { cross++; if (hits.length < 6) hits.push([m.geometry.type, h[0].point.toArray().map((v) => +v.toFixed(3))]); return } } }
+      for (let i = 0; i < cols; i++) for (let r = 0; r < rows; r++) {
+        const [p, nn] = G[i][r]; n++
+        if (r + 1 < rows) seg(p, G[i][r + 1][0]); if (i + 1 < cols) seg(p, G[i + 1][r][0])
+        for (const sg of [1, -1]) { const d = nn.clone().multiplyScalar(sg); _rc.set(p, d); _rc.far = 0.4; let best = null; for (const m of shells) { const h = _rc.intersectObject(m, false)[0]; if (h && (!best || h.distance < best.distance)) { best = h; best.m = m } } if (best) { minClear = Math.min(minClear, best.distance); const fn = best.face.normal.clone().transformDirection(best.m.matrixWorld); if (fn.dot(d) > 0) { inside++; if (hits.length < 6) hits.push(['in', p.toArray().map((v) => +v.toFixed(3)), +best.distance.toFixed(4)]) } } }
+      }
+    }
+    const bb = new THREE.Box3(); for (const sm of model.sheetMeshes) bb.expandByObject(sm, true); const cb = new THREE.Box3(); for (const m of shells) cb.expandByObject(m, true)
+    return { k: +sheetK.toFixed(4), away: +awayNow().toFixed(3), uc: +model.sheetClear().toFixed(3), sb: bb.min.toArray().concat(bb.max.toArray()).map((v) => +v.toFixed(3)), cb: cb.min.toArray().concat(cb.max.toArray()).map((v) => +v.toFixed(3)), n, cross, inside, minClear: +minClear.toFixed(4), shells: shells.length, hits }
+  }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 // ---------------- baked assets (GLB + lightmaps), procedural fallback ----------------

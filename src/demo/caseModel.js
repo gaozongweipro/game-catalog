@@ -399,28 +399,35 @@ const sleeveEdge = ribbon(0.004, INS_H + 0.028, sleeveEdgeMat); sleeveEdge.rende
 const HX = [-W / 2 + 0.012, -W / 2], HXF = [-W / 2 + 0.012]
 const hingeSkins = [ribbon(0, H - 0.004, shellMat, HX, HXF), ribbon(-T * 0.62, H - 0.004, shellMat, HX, HXF)]
 const _fm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()], _va = new THREE.Vector3(), _vb = new THREE.Vector3()
-function updateRibbon(m) {
+function updateRibbon(m, dy = 0) {
   const { pts, h } = m.userData, pos = m.geometry.attributes.position
   pts.forEach((p, k) => {
     _va.copy(p.la).applyMatrix4(_fm[p.i]); _vb.copy(p.lb).applyMatrix4(_fm[p.j]); _va.lerp(_vb, p.f)
-    pos.setXYZ(k * 2, _va.x, -h / 2, _va.z); pos.setXYZ(k * 2 + 1, _va.x, h / 2, _va.z)
+    pos.setXYZ(k * 2, _va.x, dy - h / 2, _va.z); pos.setXYZ(k * 2 + 1, _va.x, dy + h / 2, _va.z)
   })
   pos.needsUpdate = true; m.geometry.computeVertexNormals()
 }
 function updateWrap() {
   spineG.updateMatrix(); coverHinge.updateMatrix()
   _fm[1].copy(spineG.matrix); _fm[2].multiplyMatrices(spineG.matrix, coverHinge.matrix)
-  updateRibbon(sleeve); updateRibbon(sleeveEdge); hingeSkins.forEach(updateRibbon)
-  if (sheet.k <= 0) { updateRibbon(wrapIns); updateRibbon(wrapInner) } else { updateSheet(wrapIns); updateSheet(wrapInner) }
+  updateRibbon(sleeve); updateRibbon(sleeveEdge); hingeSkins.forEach((m) => updateRibbon(m))
+  // in the sleeve (k ≤ kc) the sheet keeps following the hinge creases exactly (so a lid that is still closing never meets it)
+  if (sheet.k <= sheet.kc) { const dy = sheet.k > 0 ? SLIDE * (sheet.k / sheet.kc) : 0; updateRibbon(wrapIns, dy); updateRibbon(wrapInner, dy) } else { updateSheet(wrapIns); updateSheet(wrapInner) }
 }
 // ---- removable cover sheet ----
-// sheet.k: 0 seated → 0.38 slid out of the sleeve top → 1 unfolded flat at sheet.pres (world matrix, set by the app).
-// Unfolding rotates the panels rigidly about the two creases (same frames as the hinge), while the whole sheet
-// travels from the case frame (snapshotted when the unfold begins) to the presentation frame.
-const sheet = { k: 0, pres: new THREE.Matrix4(), caseM: new THREE.Matrix4(), have: false }
+// sheet.k: 0 seated → 1 unfolded flat at sheet.pres (world matrix, set by the app); sheet.kc = k at which it is clear.
+//  k ≤ kc: the sheet only SLIDES along the case's up axis, inside the gap between shell and film (the print sits 1.8 mm
+//          outside the shell, the film 3.4 mm), out of the sleeve's open top, until its bottom edge is SLIDE_MARGIN above
+//          the case top. Expressed in the live case frame, so whatever the case does the relative motion is pure slide.
+//  k > kc: only now does it unfold about the creases and travel (Bézier, arc length) to the presentation pose.
+// sheet.anchor (optional, from the app) = case frame without the case's post-clear side-step, so the case moving out of
+// the way never drags the sheet. The app moves the case (not the sheet) for the slide, so the sheet stays in view.
+const SLIDE_MARGIN = 0.04, SLIDE = H / 2 + INS_H / 2 + SLIDE_MARGIN
+const sheet = { k: 0, kc: 0.4, pres: new THREE.Matrix4(), caseM: new THREE.Matrix4(), anchor: new THREE.Matrix4(), useAnchor: false, uc: 0.4, have: false }
 const _sm = [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()], _sq = new THREE.Quaternion(), _one = new THREE.Vector3(1, 1, 1), _Y = new THREE.Vector3(0, 1, 0)
-const _tA = new THREE.Matrix4(), _tB = new THREE.Matrix4(), _inv = new THREE.Matrix4(), _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(), _q0 = new THREE.Quaternion(), _q1 = new THREE.Quaternion(), _s0 = new THREE.Vector3(), _s1 = new THREE.Vector3(), _c = new THREE.Vector3()
-const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+const _tA = new THREE.Matrix4(), _inv = new THREE.Matrix4(), _p0 = new THREE.Vector3(), _p1 = new THREE.Vector3(), _q0 = new THREE.Quaternion(), _q1 = new THREE.Quaternion(), _s0 = new THREE.Vector3(), _s1 = new THREE.Vector3(), _c = new THREE.Vector3(), _upv = new THREE.Vector3(), _pB = new THREE.Vector3()
+const _bz = new THREE.CubicBezierCurve3(new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()); _bz.arcLengthDivisions = 200
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * t * (t * (t * 6 - 15) + 10) }
 const SHEET_CENTRE = (() => { // centre of the fully unfolded sheet in root space (for rotating about its middle)
   const { pts } = wrapIns.userData; const q = new THREE.Quaternion().setFromAxisAngle(_Y, -Math.PI / 2)
   const m1 = new THREE.Matrix4().compose(new THREE.Vector3(-W / 2, 0, -HALF), q, _one), m2 = m1.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(0, 0, D), q, _one)), fm = [new THREE.Matrix4(), m1, m2]
@@ -428,16 +435,29 @@ const SHEET_CENTRE = (() => { // centre of the fully unfolded sheet in root spac
   for (const p of pts) { a.copy(p.la).applyMatrix4(fm[p.i]); b.copy(p.lb).applyMatrix4(fm[p.j]); a.lerp(b, p.f); lo.min(a); hi.max(a) }
   return lo.add(hi).multiplyScalar(0.5).setY(0)
 })()
-function updateSheet(m) {
-  const { pts, h, total } = m.userData, pos = m.geometry.attributes.position, k = sheet.k
-  const kS = smooth(0, 0.38, k), kU = smooth(0.34, 1, k), a = kU * Math.PI
+function sheetPose() { // once per update: rigid pose of the sheet (pivot position/orientation/scale) + unfold amount kU
+  const k = sheet.k, kc = sheet.kc
   root.updateWorldMatrix(true, false)
-  sheet.caseM.copy(root.matrixWorld) // live case frame: the sheet always slides back into wherever the case is now
+  sheet.uc = kc
+  if (k <= kc) { // pure slide in the live case frame
+    root.matrixWorld.decompose(_p0, _q0, _s0); _p0.set(0, SLIDE * (k / kc), 0).applyMatrix4(root.matrixWorld); return 0
+  }
+  sheet.caseM.copy(sheet.useAnchor ? sheet.anchor : root.matrixWorld)
+  sheet.caseM.decompose(_p0, _q0, _s0); sheet.pres.decompose(_p1, _q1, _s1)
+  _upv.set(0, 1, 0).applyQuaternion(_q0)
+  _pB.set(0, SLIDE, 0).applyMatrix4(sheet.caseM) // clear point
+  const h = THREE.MathUtils.clamp(_pB.distanceTo(_p1) * 0.4, 0.05, 1.2)
+  _bz.v0.copy(_pB); _bz.v1.copy(_pB).addScaledVector(_upv, h); _bz.v2.copy(_p1).add(_c.set(0, h, 0)); _bz.v3.copy(_p1); _bz.updateArcLengths()
+  const u = smooth(kc, 1, k) // starts from rest (the sheet was still while the case slid off it), lands at rest
+  _bz.getPointAt(u, _p0); const kU = smooth(0, 0.92, u)
+  _q0.slerp(_q1, kU); _s0.lerp(_s1, kU)
+  return kU
+}
+function updateSheet(m) {
+  const { pts, h, total } = m.userData, pos = m.geometry.attributes.position
+  const kU = m === wrapIns || sheet._kU == null ? (sheet._kU = sheetPose()) : sheet._kU, a = kU * Math.PI
   _sq.setFromAxisAngle(_Y, -a / 2); _sm[1].compose(spineG.position, _sq, _one); _sm[2].copy(_sm[1]).multiply(_tA.compose(coverHinge.position, _sq, _one))
-  // rigid travel: case frame (slid up, about the sheet centre) → presentation frame
-  _tA.copy(sheet.caseM).multiply(_tB.makeTranslation(SHEET_CENTRE.x * kU, kS * (INS_H + 0.06), SHEET_CENTRE.z * kU)); _tA.decompose(_p0, _q0, _s0)
-  sheet.pres.decompose(_p1, _q1, _s1)
-  _p0.lerp(_p1, kU); _q0.slerp(_q1, kU); _s0.lerp(_s1, kU); _tA.compose(_p0, _q0, _s0)
+  _tA.compose(_p0, _q0, _s0)
   _inv.copy(root.matrixWorld).invert().multiply(_tA)
   _c.copy(SHEET_CENTRE).multiplyScalar(kU)
   pts.forEach((p, i) => {
@@ -635,10 +655,10 @@ disc.position.copy(seatWorld(_seat))
   const HINGE_MAX = THREE.MathUtils.degToRad(178)
   const easeIO = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2)
   /** Apply hinge opening (0..1) and hub press (0..1) to the rig. */
-  function pose(open, hubPress) {
-    const oe = easeIO(open)
+  function pose(open, hubPress, raw = false) { // raw: values already follow a smooth (minimum-jerk) profile → no extra easing
+    const oe = raw ? open : easeIO(open)
     spineG.rotation.y = -oe * HINGE_MAX / 2; coverHinge.rotation.y = -oe * HINGE_MAX / 2; updateWrap()
-    const pe = easeIO(hubPress)
+    const pe = raw ? hubPress : easeIO(hubPress)
     if (NSW) { btn.position.z = -pe * 0.006; btn.rotation.x = pe * 0.25; return }
     btn.position.z = 0.012 - pe * 0.014; btnHit.position.z = btn.position.z
     for (const t of teeth) { const a = t.userData.angle, r = pe * 0.028; t.position.set(-Math.cos(a) * r, -Math.sin(a) * r, 0); t.scale.setScalar(1 - pe * 0.14) }
@@ -650,6 +670,8 @@ disc.position.copy(seatWorld(_seat))
     shellMat, trayMat, filmMat, wrapPaper, bookletMat, bkPaper, labelMat, dataMat, updateWrap, seatWorld, setArt, pose, dispose,
     W, H, D, HALF, TRAY_Z, DISC_X, DISC_Y, platform, kind: SPEC.kind, INS_W, INS_H, glbParts,
     /** k 0..1 (see updateSheet); pres = world matrix of the flat sheet (its print faces local −z) */
-    setSheet(k, pres) { sheet.k = k; if (pres) sheet.pres.copy(pres); if (k <= 0) sheet.have = false; updateWrap() },
+    setSheet(k, pres, anchor, kc) { sheet.k = k; if (pres) sheet.pres.copy(pres); sheet.useAnchor = !!anchor; if (anchor) sheet.anchor.copy(anchor); if (kc) sheet.kc = kc; if (k <= 0) sheet.have = false; updateWrap() },
+    /** sheet.k at which the sheet's bottom edge has cleared the case top (start of the unfold leg) */
+    sheetClear: () => sheet.kc, sheetSlide: SLIDE,
     sheetSize: { w: wrapIns.userData.total, h: INS_H }, sheetMeshes: [wrapIns, wrapInner], sheetG }
 }
