@@ -14,40 +14,56 @@
   <div class="brand"><b id="brandT">陈列柜</b><span id="brandS">我的电子实体版</span></div>
   <div class="tools">
     <div class="seg" id="viewSeg" role="group"><button data-v="spine" aria-pressed="true" id="vSpine">书脊</button><button data-v="front" aria-pressed="false" id="vFront">正面</button></div>
+    <button class="pill icon" id="envBtn" aria-label="environment" data-ic="gear"></button>
     <button class="pill" id="menuBtn" aria-label="menu">⋯</button>
     <button class="pill" id="langBtn">EN</button>
   </div>
   <div class="menu hidden" id="menu">
     <button id="mExport">导出收藏</button>
     <button id="mImport">导入收藏</button>
+    <button id="mLang" class="narrow-only">English</button>
     <input type="file" id="importFile" accept=".json,application/json" hidden />
   </div>
 </header>
-<div class="shelfbar" id="shelfbar">
-  <input id="q" type="search" placeholder="搜索 / Search" autocomplete="off" />
-  <div class="seg" id="pf"><button data-p="all" aria-pressed="true">全部</button><button data-p="ps5" aria-pressed="false">PS5</button><button data-p="ns" aria-pressed="false">NS</button><button data-p="ns2" aria-pressed="false">NS2</button></div>
-  <select id="sort"><option value="custom">自定义顺序</option><option value="name">名称</option><option value="date">日期</option><option value="platform">平台</option></select>
-  <div class="pager hidden" id="pager"><button id="pgPrev" aria-label="prev">‹</button><span id="pgLbl">1 / 1</span><select id="pgJump" aria-label="jump"></select><button id="pgNext" aria-label="next">›</button></div>
-</div>
-<button class="fab" id="makeBtn"><span>＋</span><em id="makeT">制作</em></button>
+<nav class="tb" id="tbShelf" aria-label="shelf toolbar">
+  <button class="tbtn mob" id="tFilter" data-ic="filter"><span id="tFilterT">筛选</span><i class="dot hidden" id="tFilterDot"></i></button>
+  <div class="tb-inline" id="shelfInline">
+    <label class="search"><i data-ic="search"></i><input id="q" type="search" placeholder="搜索 / Search" autocomplete="off" /></label>
+    <div class="seg" id="pf"><button data-p="all" aria-pressed="true">全部</button><button data-p="ps5" aria-pressed="false">PS5</button><button data-p="ns" aria-pressed="false">NS</button><button data-p="ns2" aria-pressed="false">NS2</button></div>
+    <select id="sort"><option value="custom">自定义顺序</option><option value="name">名称</option><option value="date">日期</option><option value="platform">平台</option></select>
+  </div>
+  <div class="pager hidden" id="pager"><button id="pgPrev" aria-label="prev" data-ic="chevL"></button><span id="pgLbl">1 / 1</span><select id="pgJump" aria-label="jump"></select><button id="pgNext" aria-label="next" data-ic="chevR"></button></div>
+  <button class="tbtn mob" id="tView" data-ic="spines"><span id="tViewT">书脊</span></button>
+  <button class="tbtn mob" id="tEnv" data-ic="gear"><span id="tEnvT">环境</span></button>
+  <button class="tbtn pri" id="makeBtn" data-ic="plus"><span id="makeT">制作</span></button>
+</nav>
+<div class="fsheet hidden" id="fsheet"><div class="grab"></div><div class="fs-body" id="fsBody"></div></div>
 
 <div class="loading" id="loading"><div class="spin"></div><p id="loadT">正在布置展柜…</p></div>
 <div class="empty hidden" id="empty"><div class="card"><div class="glyph">▢</div><h2 id="emptyH">展柜还是空的</h2><p id="emptyP">上传封面，制作你的第一张电子实体版</p><button class="primary" id="emptyBtn">开始制作</button></div></div>
 
 <section class="inspect hidden" id="inspect">
   <div class="ihead"><h2 id="iTitle"></h2><p id="iSub"></p></div>
-  <div class="ibar">
-    <button id="iBack" class="ghost">← <span id="iBackT">放回展柜</span></button>
-    <button id="iOpen" class="primary">打开</button>
-    <button id="iDisc" class="accent">取盘</button>
-    <button id="iFlip" class="ghost hidden">翻面</button>
-    <button id="iSheet" class="ghost">抽出封面</button>
-    <button id="iReset" class="ghost">复位</button>
-    <button id="iMore" class="ghost" aria-label="more">⋯</button>
-  </div>
+  <nav class="tb ibar" id="ibar" aria-label="inspect toolbar">
+    <button id="iBack" class="tbtn" data-ic="back"><span id="iBackT">返回</span></button>
+    <button id="iOpen" class="tbtn" data-ic="open"><span>打开</span></button>
+    <button id="iDisc" class="tbtn" data-ic="disc"><span>取盘</span></button>
+    <button id="iSheet" class="tbtn" data-ic="sheetOut"><span>抽出封面</span></button>
+    <button id="iFlip" class="tbtn hidden" data-ic="flip"><span>翻面</span></button>
+    <button id="iReset" class="tbtn hidden" data-ic="reset"><span>复位</span></button>
+    <button id="iMore" class="tbtn" aria-label="more" data-ic="more"><span id="iMoreT">更多</span></button>
+  </nav>
   <div class="imore hidden" id="imore">
-    <button id="iEdit">编辑</button><button id="iLeft">前移</button><button id="iRight">后移</button><button id="iDel" class="danger">删除</button>
+    <button id="iEdit" data-ic="edit"><span id="iEditT">编辑</span></button><button id="iLeft" data-ic="chevL"><span id="iLeftT">前移</span></button><button id="iRight" data-ic="chevR"><span id="iRightT">后移</span></button><button id="iDel" class="danger" data-ic="trash"><span id="iDelT">删除</span></button>
   </div>
+</section>
+
+<section class="envp hidden" id="envp" aria-label="environment and lighting">
+  <div class="grab"></div>
+  <div class="envh"><b id="envT">环境与灯光</b><button class="tbtn ic" id="envClose" aria-label="close" data-ic="x"></button></div>
+  <div class="presets" id="presets"></div>
+  <div class="sliders" id="sliders"></div>
+  <div class="envf"><button class="tbtn" id="envReset" data-ic="reset"><span id="envResetT">恢复预设</span></button></div>
 </section>
 
 <section class="editor hidden" id="editor" aria-label="editor">

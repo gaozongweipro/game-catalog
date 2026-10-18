@@ -33,14 +33,16 @@ let lang = localStorage.getItem('game-catalog-lang') === 'en' ? 'en' : 'zh'
 // ---------------- i18n ----------------
 const S = {
   zh: { brandT: '陈列柜', brandS: '我的电子实体版', vSpine: '书脊', vFront: '正面', makeT: '制作', loadT: '正在布置展柜…', emptyH: '展柜还是空的', emptyP: '上传封面，制作你的第一张电子实体版', emptyBtn: '开始制作',
-    mExport: '导出收藏', mImport: '导入收藏', iBackT: '放回展柜', open: '打开', close: '合上', take: '取盘', put: '放回光盘', flip: '翻面', iEdit: '编辑', iLeft: '前移', iRight: '后移', iDel: '删除',
-    eNew: '制作电子实体版', eEdit: '编辑电子实体版', eCancel: '取消', eSave: '保存', lTitle: '游戏名称', lBand: '平台标识', lKey: 'Game-Key Card（钥匙卡）', platNote: '', pn_ps5: 'PS5 蓝色 Blu-ray 盒 · 135×171×13.5 mm', pn_ns: 'Switch 透明盒 + 深灰卡带 · 105×170×11 mm', pn_ns2: 'Switch 2 半透红盒 + 红色卡带 · 105×170×11 mm', takeC: '取卡带', sheetOut: '抽出封面', sheetIn: '放回封面', resetV: '复位', lkSearching: '正在搜索…', lkNone: '没有找到匹配，可上传封面，或直接保存（会根据名称生成封面）', lkWeb: '联网结果', lkCat: '目录', lkPick: '选一个自动填充封面与信息', lkFilled: '已自动填充：%s', lkFail: '封面下载失败，已保留其他信息', untitled: '未命名', putC: '放回卡带', guideFrame: '红色边框', slotNote: '全部可选：输入游戏名会自动联网查找封面并补全，未填的部分自动生成；点卡片可上传或裁切。',
+    mExport: '导出收藏', mImport: '导入收藏', mLang: 'English', iBackT: '返回', iMoreT: '更多', tFilterT: '筛选', tEnvT: '环境', open: '打开', close: '合上', take: '取盘', put: '放回', flip: '翻面', iEditT: '编辑', iLeftT: '前移', iRightT: '后移', iDelT: '删除', envT: '环境与灯光', envResetT: '恢复预设',
+    s_exposure: '曝光', s_ambient: '环境光', s_spot: '射灯', s_shelf: '柜内灯', s_temp: '色温', s_bg: '背景亮度', p_gallery: '展厅暖光', p_museum: '美术馆冷白', p_night: '夜间', p_daylight: '自然光', p_studio: '影棚',
+    eNew: '制作电子实体版', eEdit: '编辑电子实体版', eCancel: '取消', eSave: '保存', lTitle: '游戏名称', lBand: '平台标识', lKey: 'Game-Key Card（钥匙卡）', platNote: '', pn_ps5: 'PS5 蓝色 Blu-ray 盒 · 135×171×13.5 mm', pn_ns: 'Switch 透明盒 + 深灰卡带 · 105×170×11 mm', pn_ns2: 'Switch 2 半透红盒 + 红色卡带 · 105×170×11 mm', takeC: '取卡带', sheetOut: '抽出封面', sheetIn: '放回封面', resetV: '复位', lkSearching: '正在搜索…', lkNone: '没有找到匹配，可上传封面，或直接保存（会根据名称生成封面）', lkWeb: '联网结果', lkCat: '目录', lkPick: '选一个自动填充封面与信息', lkFilled: '已自动填充：%s', lkFail: '封面下载失败，已保留其他信息', untitled: '未命名', putC: '放回', guideFrame: '红色边框', slotNote: '全部可选：输入游戏名会自动联网查找封面并补全，未填的部分自动生成；点卡片可上传或裁切。',
     cHint: '拖动移动 · 双指或滚轮缩放', cReset: '重置', cReplace: '换图', cRemove: '移除', cDone: '完成', auto: '自动生成', uploaded: '已上传', required: '必填', back: '←',
     sample: '示例 · 我的实体收藏', made: '电子实体版', needTitle: '请填写游戏名称', needFront: '请上传正面封面', saved: '已保存到展柜', deleted: '已删除', delQ: '确定删除「%s」吗？', exported: '已导出', imported: '已导入 %d 项', badFile: '文件无法识别',
     sampleRO: '示例条目不能编辑', processing: '处理中…', guideBand: 'PS5 顶条区域', guideBleed: '出血线', hub: '中心孔', title: '3D 陈列柜 · 我的电子实体版' },
   en: { brandT: 'Showcase', brandS: 'My digital physical editions', vSpine: 'Spines', vFront: 'Fronts', makeT: 'Create', loadT: 'Setting up the cabinet…', emptyH: 'The cabinet is empty', emptyP: 'Upload a cover to make your first digital physical edition', emptyBtn: 'Get started',
-    mExport: 'Export collection', mImport: 'Import collection', iBackT: 'Back to shelf', open: 'Open', close: 'Close', take: 'Take disc', put: 'Put disc back', flip: 'Flip', iEdit: 'Edit', iLeft: 'Move left', iRight: 'Move right', iDel: 'Delete',
-    eNew: 'New digital edition', eEdit: 'Edit digital edition', eCancel: 'Cancel', eSave: 'Save', lTitle: 'Game title', lBand: 'Platform logo', lKey: 'Game-Key Card', platNote: '', pn_ps5: 'PS5 blue Blu-ray case · 135×171×13.5 mm', pn_ns: 'Switch clear case + dark-grey card · 105×170×11 mm', pn_ns2: 'Switch 2 translucent red case + red card · 105×170×11 mm', takeC: 'Take card', sheetOut: 'Pull out cover', sheetIn: 'Put cover back', resetV: 'Reset', lkSearching: 'Searching…', lkNone: 'No match. Upload a cover or just save (a cover will be generated from the name)', lkWeb: 'Web', lkCat: 'Catalog', lkPick: 'Pick one to auto-fill cover and details', lkFilled: 'Auto-filled: %s', lkFail: 'Cover download failed; other details kept', untitled: 'Untitled', putC: 'Put card back', guideFrame: 'Red frame', slotNote: 'Everything is optional: type a game name to look up the cover online; anything left blank is generated. Tap a card to upload or crop.',
+    mExport: 'Export collection', mImport: 'Import collection', mLang: '中文', iBackT: 'Back', iMoreT: 'More', tFilterT: 'Filter', tEnvT: 'Lighting', open: 'Open', close: 'Close', take: 'Take disc', put: 'Put back', flip: 'Flip', iEditT: 'Edit', iLeftT: 'Move left', iRightT: 'Move right', iDelT: 'Delete', envT: 'Environment & lighting', envResetT: 'Reset preset',
+    s_exposure: 'Exposure', s_ambient: 'Ambient', s_spot: 'Spotlights', s_shelf: 'Shelf lights', s_temp: 'Colour temp', s_bg: 'Background', p_gallery: 'Gallery Warm', p_museum: 'Museum Cool', p_night: 'Night', p_daylight: 'Daylight', p_studio: 'Studio',
+    eNew: 'New digital edition', eEdit: 'Edit digital edition', eCancel: 'Cancel', eSave: 'Save', lTitle: 'Game title', lBand: 'Platform logo', lKey: 'Game-Key Card', platNote: '', pn_ps5: 'PS5 blue Blu-ray case · 135×171×13.5 mm', pn_ns: 'Switch clear case + dark-grey card · 105×170×11 mm', pn_ns2: 'Switch 2 translucent red case + red card · 105×170×11 mm', takeC: 'Take card', sheetOut: 'Cover', sheetIn: 'Cover back', resetV: 'Reset', lkSearching: 'Searching…', lkNone: 'No match. Upload a cover or just save (a cover will be generated from the name)', lkWeb: 'Web', lkCat: 'Catalog', lkPick: 'Pick one to auto-fill cover and details', lkFilled: 'Auto-filled: %s', lkFail: 'Cover download failed; other details kept', untitled: 'Untitled', putC: 'Put back', guideFrame: 'Red frame', slotNote: 'Everything is optional: type a game name to look up the cover online; anything left blank is generated. Tap a card to upload or crop.',
     cHint: 'Drag to move · pinch or scroll to zoom', cReset: 'Reset', cReplace: 'Replace', cRemove: 'Remove', cDone: 'Done', auto: 'Auto', uploaded: 'Uploaded', required: 'Required', back: '←',
     sample: 'Sample · my physical copy', made: 'Digital physical edition', needTitle: 'Please enter a title', needFront: 'Please upload a front cover', saved: 'Saved to the cabinet', deleted: 'Deleted', delQ: 'Delete “%s”?', exported: 'Exported', imported: 'Imported %d item(s)', badFile: 'Unrecognised file',
     sampleRO: 'The sample entry is read-only', processing: 'Processing…', guideBand: 'PS5 band', guideBleed: 'Bleed', hub: 'Hub', title: '3D Showcase · digital physical editions' },
@@ -48,11 +50,30 @@ const S = {
 const t = (k) => S[lang][k] ?? k
 function syncLang() {
   document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'; document.title = t('title')
-  for (const k of ['brandT', 'brandS', 'vSpine', 'vFront', 'makeT', 'loadT', 'emptyH', 'emptyP', 'emptyBtn', 'mExport', 'mImport', 'iBackT', 'iEdit', 'iLeft', 'iRight', 'iDel', 'eCancel', 'eSave', 'lTitle', 'lBand', 'lKey', 'slotNote', 'cHint', 'cReset', 'cReplace', 'cRemove', 'cDone']) { const el = $(k); if (el) el.textContent = t(k) }
+  for (const k of ['brandT', 'brandS', 'vSpine', 'vFront', 'makeT', 'loadT', 'emptyH', 'emptyP', 'emptyBtn', 'mExport', 'mImport', 'mLang', 'iBackT', 'iMoreT', 'tFilterT', 'tEnvT', 'iEditT', 'iLeftT', 'iRightT', 'iDelT', 'envT', 'envResetT', 'eCancel', 'eSave', 'lTitle', 'lBand', 'lKey', 'slotNote', 'cHint', 'cReset', 'cReplace', 'cRemove', 'cDone']) { const el = $(k); if (el) el.textContent = t(k) }
   $('langBtn').textContent = lang === 'en' ? '中文' : 'EN'; $('back').href = BASE
-  syncInspectUI(); if (editing) renderSlots()
+  if (typeof syncViewBtn === 'function') syncViewBtn(); syncInspectUI(); if (editing) renderSlots(); if (typeof renderEnvUI === 'function') renderEnvUI()
 }
 function toast(msg) { const el = $('toast'); el.textContent = msg; el.classList.remove('hidden'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.add('hidden'), 2200) }
+
+// ---------------- icons (inline SVG, stroke = currentColor) ----------------
+const gearPath = (() => { let d = ''; for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2, r = i % 2 ? 7.2 : 9.4, a2 = a + Math.PI / 16 * 0.55; d += `${i ? 'L' : 'M'}${(12 + r * Math.cos(a - Math.PI / 16 * 0.55)).toFixed(2)} ${(12 + r * Math.sin(a - Math.PI / 16 * 0.55)).toFixed(2)}L${(12 + r * Math.cos(a2)).toFixed(2)} ${(12 + r * Math.sin(a2)).toFixed(2)}` } return d + 'Z' })()
+const IC = { back: '<path d="M15 18l-6-6 6-6"/>', open: '<path d="M3 5.5h6.5A2.5 2.5 0 0 1 12 8v11a2 2 0 0 0-2-2H3zM21 5.5h-6.5A2.5 2.5 0 0 0 12 8v11a2 2 0 0 1 2-2h7z"/>', close: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 3.5v17"/>',
+  disc: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.4"/><path d="M12 6.2a5.8 5.8 0 0 1 5.4 3.7"/>', cart: '<rect x="7" y="3.5" width="10" height="17" rx="2"/><path d="M9.5 6.5h5M9.5 9h5"/>',
+  sheetOut: '<path d="M5 11v8.5h14V11"/><path d="M12 15V3.5M8 7.5l4-4 4 4"/>', sheetIn: '<path d="M5 11v8.5h14V11"/><path d="M12 3.5V15M8 11l4 4 4-4"/>',
+  flip: '<path d="M4 10a8 8 0 0 1 14.3-3.7L20 8M20 3.5V8h-4.5"/><path d="M20 14a8 8 0 0 1-14.3 3.7L4 16M4 20.5V16h4.5"/>', reset: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 3.5v5h5"/>',
+  more: '<circle cx="5.5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor"/>', filter: '<path d="M4 6.5h16M7 12h10M10 17.5h4"/>', search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', chevL: '<path d="M14.5 6l-6 6 6 6"/>', chevR: '<path d="M9.5 6l6 6-6 6"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', trash: '<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>', spines: '<path d="M5 4.5v15M9 4.5v15M13 4.5v15"/><path d="M16.5 5.2l3.4 14"/>', fronts: '<rect x="3.5" y="5" width="7" height="14" rx="1.2"/><rect x="13.5" y="5" width="7" height="14" rx="1.2"/>', gear: `<path d="${gearPath}"/><circle cx="12" cy="12" r="3"/>` }
+const svg = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[k] || ''}</svg>`
+function setIcon(el, k) { if (!el || el.dataset.icNow === k) return; el.dataset.icNow = k; el.querySelector('svg')?.remove(); el.insertAdjacentHTML('afterbegin', svg(k)) }
+document.querySelectorAll('[data-ic]').forEach((el) => setIcon(el, el.dataset.ic))
+/** contextual toolbar button: label, icon, emphasis ('pri' | 'acc' | ''), visibility, disabled */
+function tbSet(id, { label, ic, kind = '', show = true, dis = false }) {
+  const el = $(id); if (!el) return; el.classList.toggle('hidden', !show); if (!show) return
+  if (label != null) { const sp = el.querySelector('span'); if (sp && sp.textContent !== label) sp.textContent = label; el.title = label }
+  if (ic) setIcon(el, ic); el.classList.toggle('pri', kind === 'pri'); el.classList.toggle('acc', kind === 'acc'); el.disabled = !!dis
+}
 
 // ---------------- renderer / scene ----------------
 const cv = $('c')
@@ -67,7 +88,7 @@ const scene = new THREE.Scene()
 const pmrem = new THREE.PMREMGenerator(renderer)
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; scene.environmentIntensity = 0.32
 // CC0 gallery HDRI (Poly Haven "sculpture_exhibition") for reflections; RoomEnvironment stays as the fallback
-new HDRLoader().load(BASE + (mobile ? 'cab/gallery_512.hdr' : 'cab/gallery_1k.hdr'), (t) => { t.mapping = THREE.EquirectangularReflectionMapping; scene.environment = pmrem.fromEquirectangular(t).texture; t.dispose(); scene.environmentIntensity = +(qs.get('env') || 0.4); dirty = 3 }, undefined, () => {})
+// (HDRI is loaded per environment preset: applyEnv / loadHdri below)
 // strip probe-grid irradiance from big realtime surfaces outside the cabinet (floor/wall are lit by the spots already)
 const noProbe = (m) => { m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('#ifdef USE_LIGHT_PROBES_GRID', '#ifdef USE_LIGHT_PROBES_GRID_OFF')) }; m.customProgramCacheKey = () => 'noprobe'; return m }
 scene.background = new THREE.Color(0x1b1916)
@@ -504,6 +525,7 @@ function inspectPose() { const c = cabinetCenter(); INS.set(0, Math.min(c.y, 2.4
 let mode = 'shelf' // shelf | fly | inspect | back | editor
 let sel = null, flyT = 0, flyFrom = null
 let open = 0, openT = 0, hubP = 0, hubT = 0, out = 0, outT = 0, discFocus = false, flip = 0, flipT = 0, spin = 0, releaseArmed = false, reseating = false
+let pendingSheetOut = false, sFlip = 0, sFlipT = 0
 let dirty = 3, pending = null, sheetK = 0, sheetT = 0, rotObj = 'case', caseAway = 0, sheetDock = false, dockK = 0, pendingSheetIn = false
 const DOCK_OFF = new THREE.Vector3(-1.55, 0.62, -0.7), _dockP = new THREE.Vector3(), _cp = new THREE.Vector3(), _F = new THREE.Vector3()
 function inspCam(out) { const d = mobile && innerWidth < innerHeight ? 5.2 : 4.0; return out.copy(INS).add(_v2.set(0.75, 0.42, d)) }
@@ -552,13 +574,18 @@ function backToShelf() {
 let pendingBack = false
 function pressHub() { if (mode !== 'inspect' || open < 0.65 || outT || (sheetK > 0 && !sheetDock)) return; rot.reset(); reseating = false; releaseArmed = false; hubT = 1; syncInspectUI() }
 function reseat() { rot.reset(); discFocus = false; flipT = 0; outT = 0; reseating = true; syncInspectUI(); goCam(camInspectGoal()) }
+// contextual inspect toolbar: case → open | case open → take disc | disc out → put back / flip | cover out → put back / flip
+function inspectState() { if (sheetK > 0 && !sheetDock) return 'cover'; if (outT || discFocus || out > 0.02) return 'disc'; if (openT || open > 0.5) return 'open'; return 'case' }
 function syncInspectUI() {
   if (!sel) return
   $('iTitle').textContent = sel.title || ''; $('iSub').textContent = sel.sample ? t('sample') : `${{ ps5: 'PS5', ns: 'Nintendo Switch', ns2: 'Nintendo Switch 2' }[sel.platform || 'ps5']}${sel.keyCard && sel.platform === 'ns2' ? ' · Game-Key Card' : ''} · ${t('made')}`
-  $('iOpen').textContent = openT ? t('close') : t('open'); $('iOpen').disabled = !!(outT || out > 0.02 || hubT || (sheetT && sheetK < 1 && !sheetDock) || (!sheetT && sheetK > 0))
-  $('iSheet').textContent = sheetT ? t('sheetIn') : t('sheetOut'); $('iSheet').disabled = (!sheetT && (caseBusy() || sheetK > 0)) || (sheetT && sheetK < 1); $('iReset').textContent = t('resetV')
-  const cart = model.kind === 'cart'; $('iDisc').textContent = (outT || discFocus) ? t(cart ? 'putC' : 'put') : t(cart ? 'takeC' : 'take'); $('iDisc').disabled = (!(open > 0.65) && !outT) || (sheetK > 0 && !sheetDock)
-  $('iFlip').textContent = t('flip'); $('iFlip').classList.toggle('hidden', !discFocus)
+  const st = inspectState(), cart = model.kind === 'cart', sheetBusy = (sheetT && sheetK < 1) || (!sheetT && sheetK > 0) || pendingSheetOut
+  const openBusy = !!(outT || out > 0.02 || hubT || (sheetT && sheetK < 1 && !sheetDock) || (!sheetT && sheetK > 0))
+  tbSet('iOpen', { label: openT ? t('close') : t('open'), ic: openT ? 'close' : 'open', kind: st === 'case' ? 'pri' : '', show: st === 'case' || st === 'open', dis: openBusy })
+  tbSet('iDisc', { label: (outT || discFocus) ? t(cart ? 'putC' : 'put') : t(cart ? 'takeC' : 'take'), ic: cart ? 'cart' : 'disc', kind: st === 'open' ? 'acc' : st === 'disc' ? 'pri' : '', show: st === 'open' || st === 'disc', dis: (!(open > 0.65) && !outT) || (sheetK > 0 && !sheetDock) || (outT && !discFocus) })
+  tbSet('iSheet', { label: sheetT ? t('sheetIn') : t('sheetOut'), ic: sheetT ? 'sheetIn' : 'sheetOut', kind: st === 'cover' ? 'pri' : '', show: st !== 'disc', dis: sheetBusy || (sheetT && sheetDock) })
+  tbSet('iFlip', { label: t('flip'), show: (st === 'disc' && discFocus) || (st === 'cover' && sheetK >= 1) })
+  tbSet('iReset', { label: t('resetV'), show: !rot.idle })
   $('iEdit').disabled = !!sel.sample
 }
 
@@ -585,7 +612,7 @@ cv.addEventListener('pointerup', (e) => {
 const clock = new THREE.Clock()
 const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2)
 const step = (v, tg, dt, dur) => (tg > v ? Math.min(tg, v + dt / dur) : Math.max(tg, v - dt / dur))
-const _rq = new THREE.Quaternion(), _sp = new THREE.Vector3(), _sM = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _qY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
+const _q2 = new THREE.Quaternion(), _rq = new THREE.Quaternion(), _sp = new THREE.Vector3(), _sM = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _qY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _seat = new THREE.Vector3(), _lift = new THREE.Vector3(), qFront = new THREE.Quaternion()
 function bez(a, b, c, k, out) { const u = 1 - k; return out.set(0, 0, 0).addScaledVector(a, u * u).addScaledVector(b, 2 * u * k).addScaledVector(c, k * k) }
 function tick() {
@@ -620,6 +647,9 @@ function tick() {
     sheetK = step(sheetK, sheetT, dt, 2.2); if (sheetK !== tick._sk) { tick._sk = sheetK; busy = true; if (sheetK === 0 || sheetK === 1) syncInspectUI() }
     const wantBack = pendingBack && open < 0.01 && !outT && out < 0.01 && sheetK <= 0 && rot.idle // acted on AFTER this block (see below)
     if (pendingSheetIn && open < 0.01 && !openT && out < 0.01 && !outT) { pendingSheetIn = false; sheetDock = false; sheetT = 0; syncInspectUI() }
+    // cover requested while the case was open / disc out: the case closes (disc reseated) first, then the sheet slides out
+    if (pendingSheetOut && open < 0.01 && !openT && out < 0.01 && !outT && !hubT && hubP < 0.01) { pendingSheetOut = false; sheetDock = false; sheetT = 1; sFlipT = 0; rot.reset(); syncInspectUI() }
+    const sf0 = sFlip; sFlip = step(sFlip, sFlipT, dt, 0.7); if (sf0 !== sFlip) busy = true
     const dk0 = dockK; dockK = step(dockK, sheetDock ? 1 : 0, dt, 0.7); if (dk0 !== dockK) busy = true
     if (o0 !== open || h0 !== hubP || u0 !== out || discFocus) busy = true
     if ((o0 > 0.4) !== (open > 0.4) && auto) goCam(camInspectGoal())
@@ -639,7 +669,7 @@ function tick() {
       const cp = inspCam(_cp), P = _sp.copy(INS).lerp(_dockP.copy(INS).add(DOCK_OFF), ease(dockK)); if (act === 'sheet') P.add(rot.offset(INS, _v))
       const dist = cp.distanceTo(P), vh = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * dist, vw = vh * camera.aspect
       const fit = Math.min(1, (0.86 * vw) / model.sheetSize.w, (0.7 * vh) / model.sheetSize.h) * (1 - 0.62 * ease(dockK)) // docked: small, upper-left, out of the way
-      _sM.lookAt(cp, P, _up); _q.setFromRotationMatrix(_sM).multiply(_qY180); if (act === 'sheet') _q.premultiply(_rq)
+      _sM.lookAt(cp, P, _up); _q.setFromRotationMatrix(_sM).multiply(_qY180); if (sFlip > 0) _q.multiply(_q2.setFromAxisAngle(_up, ease(sFlip) * Math.PI)); if (act === 'sheet') _q.premultiply(_rq)
       _sM.compose(P, _q, _v.setScalar(fit)); model.setSheet(sheetK, _sM)
     } else model.setSheet(0)
     holder.updateMatrixWorld(true); model.pose(open, hubP)
@@ -658,7 +688,7 @@ function tick() {
       if (act === 'disc') { model.disc.quaternion.premultiply(_rq); model.disc.position.add(rot.offset(F, _v)) }
     }
     holder.visible = true // the case is moved aside (caseAway) instead of hidden, so a docked sheet stays visible
-    const ui = `${open > 0.65}|${openT}|${outT}|${hubT}|${discFocus}|${sheetDock}|${sheetK > 0}`; if (ui !== tick._ui) { tick._ui = ui; syncInspectUI() }
+    const ui = `${open > 0.65}|${open > 0.5}|${openT}|${outT}|${hubT}|${discFocus}|${sheetDock}|${sheetK > 0}|${rot.idle}|${pendingSheetOut}`; if (ui !== tick._ui) { tick._ui = ui; syncInspectUI() }
     // return-to-shelf is triggered last so nothing later in this frame can re-show the inspect model (was: duplicate case)
     if (wantBack && mode === 'inspect') backToShelf()
   }
@@ -745,15 +775,27 @@ function applyViewOffset() {
 addEventListener('resize', resize)
 
 // ---------------- toolbar ----------------
-function closeMenus() { $('menu').classList.add('hidden'); $('imore').classList.add('hidden') }
+function closeMenus() { $('menu').classList.add('hidden'); $('imore').classList.add('hidden'); $('fsheet').classList.add('hidden') }
+$('mLang').onclick = () => { closeMenus(); $('langBtn').onclick() }
 $('langBtn').onclick = () => { lang = lang === 'en' ? 'zh' : 'en'; try { localStorage.setItem('game-catalog-lang', lang) } catch {}; syncLang() }
 $('menuBtn').onclick = (e) => { e.stopPropagation(); $('menu').classList.toggle('hidden') }
 $('iMore').onclick = (e) => { e.stopPropagation(); $('imore').classList.toggle('hidden') }
+// mobile: search / platform / sort live in a sheet above the toolbar (same nodes, moved), desktop: inline in the bar
+const narrowMQ = matchMedia('(max-width:600px)')
+function placeShelfInline() { const el = $('shelfInline'), host = narrowMQ.matches ? $('fsBody') : $('tbShelf'); if (el.parentNode !== host) { if (host === $('tbShelf')) host.insertBefore(el, $('pager')); else host.appendChild(el) } }
+narrowMQ.addEventListener('change', () => { placeShelfInline(); closeMenus() }); placeShelfInline()
+$('tFilter').onclick = (e) => { e.stopPropagation(); const h = $('fsheet').classList.contains('hidden'); closeMenus(); $('fsheet').classList.toggle('hidden', !h) }
+$('fsheet').addEventListener('click', (e) => e.stopPropagation())
+addEventListener('click', (e) => { if (!e.target.closest?.('#fsheet,#tFilter,#imore,#iMore,#menu,#menuBtn,#envp,#envBtn,#tEnv')) { closeMenus(); closeEnv() } })
+function syncFilterDot() { $('tFilterDot').classList.toggle('hidden', !(fQuery || fPlat !== 'all' || fSort !== 'custom')) }
+function syncViewBtn() { tbSet('tView', { label: t(viewMode === 'spine' ? 'vSpine' : 'vFront'), ic: viewMode === 'spine' ? 'spines' : 'fronts' }) }
 function setView(v) {
-  viewMode = v; localStorage.setItem('showcase-view', v)
+  viewMode = v; localStorage.setItem('showcase-view', v); syncViewBtn()
   for (const b of $('viewSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === v))
   syncShelf(true).then(() => { if (mode === 'shelf') goCam(camShelfGoal()) })
 }
+$('tView').onclick = () => { if (mode === 'shelf') setView(viewMode === 'spine' ? 'front' : 'spine') }
+$('tView').classList.remove('hidden')
 $('viewSeg').onclick = (e) => { const v = e.target.dataset?.v; if (v && v !== viewMode && mode === 'shelf') setView(v) }
 $('mExport').onclick = async () => {
   closeMenus(); const blob = await exportCollection(entries.filter((e) => !e.sample))
@@ -766,11 +808,15 @@ $('importFile').onchange = async (e) => {
 }
 $('iOpen').onclick = () => { if (outT || hubT) return; if (sheetT) sheetDock = true; rot.reset(); openT = openT ? 0 : 1; syncInspectUI() }
 $('iDisc').onclick = () => { if (outT || discFocus) reseat(); else pressHub() }
-$('iFlip').onclick = () => { flipT = flipT ? 0 : 1 }
+$('iFlip').onclick = () => { if (sheetK > 0 && !sheetDock) { sFlipT = sFlipT ? 0 : 1; rot.reset(); dirty = 3 } else flipT = flipT ? 0 : 1 }
 function caseBusy() { return !!(openT || open > 0.01 || outT || out > 0.01 || hubT) }
 // put the sheet back: it can only slide into a CLOSED case with the disc seated → close / reseat first, then slide in
-function putSheetBack() { rot.reset(); if (caseBusy()) { pendingSheetIn = true; sheetDock = true; if (outT || discFocus) reseat(); openT = 0 } else { sheetDock = false; sheetT = 0 } syncInspectUI(); dirty = 3 }
-$('iSheet').onclick = () => { if (sheetT) putSheetBack(); else if (!caseBusy()) { sheetT = 1; sheetDock = false; rot.reset(); syncInspectUI(); dirty = 3 } }
+function putSheetBack() { rot.reset(); sFlipT = 0; pendingSheetOut = false; if (caseBusy()) { pendingSheetIn = true; sheetDock = true; if (outT || discFocus) reseat(); openT = 0 } else { sheetDock = false; sheetT = 0 } syncInspectUI(); dirty = 3 }
+$('iSheet').onclick = () => {
+  if (sheetT) putSheetBack()
+  else if (!caseBusy()) { sheetT = 1; sheetDock = false; sFlipT = 0; rot.reset(); syncInspectUI(); dirty = 3 }
+  else if (!pendingSheetOut) { pendingSheetOut = true; rot.reset(); if (outT || discFocus) reseat(); openT = 0; syncInspectUI(); dirty = 3 } // was: disabled while open → "can't pull the cover out"
+}
 $('iReset').onclick = () => { rot.reset(); dirty = 3 }
 $('iBack').onclick = () => backToShelf()
 $('iDel').onclick = async () => {
@@ -1009,9 +1055,82 @@ addEventListener('resize', () => { if (!$('crop').classList.contains('hidden')) 
 
 $('pgPrev').onclick = () => goPage(page - 1); $('pgNext').onclick = () => goPage(page + 1); $('pgJump').onchange = (e) => goPage(+e.target.value)
 let qTimer = 0
-$('q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { fQuery = $('q').value; page = 0; syncShelf(true).then(() => goPage(0)) }, 250) }
-$('pf').onclick = (e) => { const v = e.target.dataset?.p; if (!v) return; fPlat = v; for (const b of $('pf').children) b.setAttribute('aria-pressed', String(b.dataset.p === v)); page = 0; syncShelf(true).then(() => goPage(0)) }
-$('sort').value = fSort; $('sort').onchange = (e) => { fSort = e.target.value; localStorage.setItem('showcase-sort', fSort); syncShelf(true) }
+$('q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { fQuery = $('q').value; page = 0; syncFilterDot(); syncShelf(true).then(() => goPage(0)) }, 250) }
+$('pf').onclick = (e) => { const v = e.target.dataset?.p; if (!v) return; fPlat = v; syncFilterDot(); for (const b of $('pf').children) b.setAttribute('aria-pressed', String(b.dataset.p === v)); page = 0; syncShelf(true).then(() => goPage(0)) }
+$('sort').value = fSort; $('sort').onchange = (e) => { fSort = e.target.value; syncFilterDot(); localStorage.setItem('showcase-sort', fSort); syncShelf(true) }
+// ---------------- environment & lighting presets ----------------
+// Each preset sets the room (wall / floor / backdrop), HDRI + exposure, track-spot colour temperature / power and the
+// concealed shelf lights. The static cabinet follows through the split lightmaps (spot / shelf / world groups mixed in
+// the shader, see bakedCabinet.js LMU); dynamic objects through the matching realtime lights. Sliders are multipliers on
+// the preset (exposure, colour temperature: absolute). Persisted in localStorage.
+const HDRI = { gallery: 'gallery', studio: 'studio', loft: 'loft' }
+const PRESETS = {
+  gallery: { sw: ['#2c2620', '#d79f5c'], hdri: 'gallery', env: 0.4, exposure: 1, ambient: 1, spot: 0.9, shelf: 0.85, temp: 2900, shelfTemp: 3000, wall: '#6d655c', floor: ['#9a938b', 0.42, 0.7], back: '#1b1916' },
+  museum: { sw: ['#9ea3a6', '#f1f4f6'], hdri: 'gallery', env: 0.6, exposure: 1.05, ambient: 3, spot: 1.1, shelf: 0.8, temp: 4000, shelfTemp: 3500, wall: '#a9acab', floor: ['#c2bfb8', 0.5, 0.45], back: '#2b2d2e' },
+  night: { sw: ['#0c0b0a', '#b8732f'], hdri: 'gallery', env: 0.1, exposure: 1, ambient: 0.2, spot: 0.08, shelf: 1.25, temp: 2700, shelfTemp: 2700, wall: '#4b443d', floor: ['#5a534c', 0.22, 0.9], back: '#0a0908' },
+  daylight: { sw: ['#e8e2d6', '#a9c8e4'], hdri: 'loft', env: 1, exposure: 1, ambient: 16, spot: 0.3, shelf: 0.45, temp: 5600, shelfTemp: 4200, wall: '#c9c2b6', floor: ['#bdb4a6', 0.5, 0.35], back: '#5e5b56' },
+  studio: { sw: ['#5c5c5c', '#c4c4c4'], hdri: 'studio', env: 0.85, exposure: 1, ambient: 6, spot: 0.7, shelf: 0.6, temp: 4600, shelfTemp: 3700, wall: '#7b7b7b', floor: ['#7b7b7b', 0.85, 0], back: '#474747', flat: true },
+}
+const SLIDERS = [['exposure', 0.4, 2, 0.01, (v) => v.toFixed(2)], ['ambient', 0, 3, 0.01], ['spot', 0, 3, 0.01], ['shelf', 0, 3, 0.01], ['temp', 2200, 6500, 50, (v) => `${v} K`], ['bg', 0.2, 2.5, 0.01]]
+const envDefaults = (k) => ({ preset: k, exposure: PRESETS[k].exposure, ambient: 1, spot: 1, shelf: 1, temp: PRESETS[k].temp, bg: 1 })
+let env = (() => { try { const v = JSON.parse(localStorage.getItem('showcase-env')); if (v && PRESETS[v.preset]) return { ...envDefaults(v.preset), ...v } } catch {} return envDefaults('gallery') })()
+if (PRESETS[qs.get('preset')]) env = envDefaults(qs.get('preset'))
+// colour temperature → linear RGB (Tanner Helland fit, sRGB-encoded → linear), normalised to unit luminance
+function kelvin(K) {
+  const t = K / 100; let r, g, b
+  r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592)
+  g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492)
+  b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307
+  const c = new THREE.Color().setRGB(...[r, g, b].map((x) => THREE.MathUtils.clamp(x, 0, 255) / 255), THREE.SRGBColorSpace)
+  const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; return c.multiplyScalar(1 / l)
+}
+const K_SPOT = kelvin(2900), K_SHELF = kelvin(3000) // what the bake was lit with
+const tintVs = (K, ref) => { const k = kelvin(K); return [k.r / ref.r, k.g / ref.g, k.b / ref.b] }
+const lightCol = (K) => { const k = kelvin(K); return k.multiplyScalar(1 / Math.max(k.r, k.g, k.b)) }
+function wallTexFor(hex, flat) {
+  const c = canvas(16, 512), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 512), b = new THREE.Color(hex), st = (k) => '#' + b.clone().multiplyScalar(k).getHexString()
+  if (flat) { gr.addColorStop(0, st(0.78)); gr.addColorStop(0.55, st(1)); gr.addColorStop(1, st(1.02)) } // seamless studio sweep
+  else { gr.addColorStop(0, st(0.4)); gr.addColorStop(0.4, st(1)); gr.addColorStop(0.8, st(1.15)); gr.addColorStop(0.97, st(1.02)); gr.addColorStop(1, st(0.53)) }
+  g.fillStyle = gr; g.fillRect(0, 0, 16, 512); const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx
+}
+const hdrCache = {}
+function loadHdri(k) {
+  if (hdrCache[k]) return hdrCache[k]
+  const f = k === 'gallery' ? (mobile ? 'cab/gallery_512.hdr' : 'cab/gallery_1k.hdr') : `cab/${k}_${mobile ? '512' : '1k'}.hdr`
+  return (hdrCache[k] = new HDRLoader().loadAsync(BASE + f).then((t) => { t.mapping = THREE.EquirectangularReflectionMapping; const e = pmrem.fromEquirectangular(t).texture; t.dispose(); return e }).catch(() => null))
+}
+let envRoom = null, envSeq = 0
+function applyEnv(persist = true) {
+  const P = PRESETS[env.preset], amb = P.ambient * env.ambient, sp = P.spot * env.spot, sh = P.shelf * env.shelf, bg = env.bg
+  const tS = env.temp, tF = env.temp + (P.shelfTemp - P.temp)
+  renderer.toneMappingExposure = env.exposure
+  BAKED?.setMix?.([tintVs(tS, K_SPOT).map((v) => v * sp), tintVs(tF, K_SHELF).map((v) => v * sh), [amb, amb, amb]])
+  const base = BAKED ? [70, 70, 39, 120, 120] : [150, 150, 0, 120, 120], cS = lightCol(tS), cF = lightCol(tF)
+  spots.forEach((l, i) => { l.intensity = base[i] * sp; l.color.copy(cS) })
+  leds.forEach((ra) => { aimLed(ra, FL_W * (BAKED ? FL_CASE : FL_PROC) * sh); ra.color.copy(cF) })
+  hemi.intensity = 0.12 * Math.pow(amb, 0.6); key.intensity = 0.32 * Math.sqrt(Math.max(sp, amb / 16)); key.color.copy(cS)
+  if (envRoom !== P.wall + P.flat) { envRoom = P.wall + P.flat; wall.material.map?.dispose(); wall.material.map = wallTexFor(P.wall, P.flat); wall.material.needsUpdate = true }
+  wall.material.color.setScalar(bg); floorMat.color.set(P.floor[0]).multiplyScalar(bg); floorMat.roughness = P.floor[1]; floorMat.clearcoat = P.floor[2]
+  scene.background.set(P.back).multiplyScalar(Math.min(bg, 2)); skirting.material.color.set(P.flat ? P.wall : 0x2c2825).multiplyScalar(P.flat ? bg * 0.9 : 1)
+  const seq = ++envSeq; loadHdri(HDRI[P.hdri] || 'gallery').then((e) => { if (seq !== envSeq || !e) return; scene.environment = e; scene.environmentIntensity = P.env * Math.sqrt(Math.max(env.ambient, 0.05)) * (+(qs.get('env') || 1)); dirty = 3 })
+  if (persist) try { localStorage.setItem('showcase-env', JSON.stringify(env)) } catch {}
+  renderer.shadowMap.needsUpdate = true; if (typeof scheduleProbes === 'function' && BAKED) scheduleProbes(); dirty = 3
+}
+function renderEnvUI() {
+  const pr = $('presets'); if (!pr) return
+  if (!pr.children.length) for (const k of Object.keys(PRESETS)) { const b = document.createElement('button'); b.className = 'pr'; b.dataset.k = k; b.innerHTML = `<i style="background:linear-gradient(150deg,${PRESETS[k].sw[1]} 0%,${PRESETS[k].sw[1]} 22%,${PRESETS[k].sw[0]} 78%)"></i><span></span>`; b.onclick = () => { env = envDefaults(k); applyEnv(); renderEnvUI() }; pr.appendChild(b) }
+  for (const b of pr.children) { b.setAttribute('aria-pressed', String(b.dataset.k === env.preset)); b.querySelector('span').textContent = t('p_' + b.dataset.k) }
+  const box = $('sliders')
+  if (!box.children.length) for (const [k, mn, mx, st] of SLIDERS) { const d = document.createElement('div'); d.className = 'sl' + (k === 'temp' ? ' temp' : ''); d.innerHTML = `<label for="sl_${k}"></label><output></output><input type="range" id="sl_${k}" min="${mn}" max="${mx}" step="${st}">`; d.querySelector('input').oninput = (e) => { env[k] = +e.target.value; applyEnv(); renderEnvUI() }; box.appendChild(d) }
+  SLIDERS.forEach(([k, , , , fmt], i) => { const d = box.children[i], v = env[k]; d.querySelector('label').textContent = t('s_' + k); d.querySelector('output').textContent = fmt ? fmt(v) : `${Math.round(v * 100)}%`; const inp = d.querySelector('input'); if (+inp.value !== v) inp.value = v; inp.style.setProperty('--p', `${((v - inp.min) / (inp.max - inp.min)) * 100}%`) })
+}
+function closeEnv() { $('envp').classList.add('hidden'); document.body.classList.remove('env-open'); $('envBtn').setAttribute('aria-pressed', 'false') }
+$('envBtn').onclick = (e) => { e.stopPropagation(); const h = $('envp').classList.contains('hidden'); closeMenus(); if (h) { renderEnvUI(); $('envp').classList.remove('hidden'); document.body.classList.add('env-open'); $('envBtn').setAttribute('aria-pressed', 'true') } else closeEnv() }
+$('envClose').onclick = () => closeEnv()
+$('tEnv').onclick = (e) => $('envBtn').onclick(e)
+$('envReset').onclick = () => { env = envDefaults(env.preset); applyEnv(); renderEnvUI() }
+$('envp').addEventListener('click', (e) => e.stopPropagation())
+applyEnv(false)
 // ---------------- boot ----------------
 async function boot() {
   syncLang()
@@ -1035,14 +1154,14 @@ async function boot() {
   setMode('shelf')
   window.__sc = { vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, glb: () => model.glbParts,
     // debug: visible meshes (outside the disc group) whose world bounds come within r of the presented disc
-    near: (r = 0.9) => { const c = model.disc.getWorldPosition(new THREE.Vector3()), out = [], bs = new THREE.Sphere(); scene.traverseVisible((o) => { if (!o.isMesh) return; for (let p = o; p; p = p.parent) if (p === model.disc) return; if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); bs.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld); const d = bs.center.distanceTo(c) - bs.radius; if (d < r) { let path = o.name || o.type; for (let p = o.parent; p && p !== scene; p = p.parent) path = (p.name || 'g') + '/' + path; out.push([+d.toFixed(2), path, o.material?.name || o.material?.type]) } }); return out.sort((a, b) => a[0] - b[0]).slice(0, 30) }, door: (v) => { doorTarget = v; dirty = 3 }, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
+    near: (r = 0.9) => { const c = model.disc.getWorldPosition(new THREE.Vector3()), out = [], bs = new THREE.Sphere(); scene.traverseVisible((o) => { if (!o.isMesh) return; for (let p = o; p; p = p.parent) if (p === model.disc) return; if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); bs.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld); const d = bs.center.distanceTo(c) - bs.radius; if (d < r) { let path = o.name || o.type; for (let p = o.parent; p && p !== scene; p = p.parent) path = (p.name || 'g') + '/' + path; out.push([+d.toFixed(2), path, o.material?.name || o.material?.type]) } }); return out.sort((a, b) => a[0] - b[0]).slice(0, 30) }, door: (v) => { doorTarget = v; dirty = 3 }, env: (p) => { if (p && PRESETS[p]) { env = envDefaults(p); applyEnv(false); renderEnvUI() } return { ...env, split: !!BAKED?.split } }, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   if (qs.has('inspect')) setTimeout(() => selectEntry(entries[Math.min(+qs.get('inspect') || 0, entries.length - 1)].id), 300)
 }
 // ---------------- baked assets (GLB + lightmaps), procedural fallback ----------------
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))])
 const bakedReady = qs.has('procedural') ? Promise.resolve() : Promise.allSettled([
   withTimeout(loadBakedCabinet({ renderer, base: BASE, mobile, lmGain: +(qs.get('lm') || 1), mats: { doorGlass, streakMat, glassMat, glassEdge, glassLine, doorEdge, brass } }), 20000)
-    .then((b) => { BAKED = b; useBakedLights(); if (nCab) buildCabinets(nCab, true); console.info('[showcase] baked cabinet ready') })
+    .then((b) => { BAKED = b; useBakedLights(); applyEnv(false); if (nCab) buildCabinets(nCab, true); console.info('[showcase] baked cabinet ready') })
     .catch((err) => console.warn('[showcase] baked cabinet failed, using procedural', err)),
   withTimeout(loadCaseParts(BASE), 20000).then(() => { for (const k of Object.keys(models)) { models[k].dispose(); delete models[k] } useModel(sel?.platform || 'ps5') })
     .catch((err) => console.warn('[showcase] case GLB failed, using procedural case', err)),

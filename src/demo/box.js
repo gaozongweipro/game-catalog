@@ -166,7 +166,7 @@ function syncUI() {
   ui.bReset.textContent = t.reset
   ui.bOpen.textContent = openTarget ? t.close : t.open
   ui.bOpen.disabled = !canOpen()
-  ui.bSheet.textContent = sheetT ? t.sheetIn : t.sheetOut; ui.bSheet.disabled = (!sheetT && (!canSheet() || sheetK > 0)) || (sheetT && sheetK < 1)
+  ui.bSheet.textContent = sheetT ? t.sheetIn : t.sheetOut; ui.bSheet.disabled = (!sheetT && (sheetK > 0 || pendingSheetOut)) || (sheetT && sheetK < 1)
   ui.bDisc.textContent = (outTarget || discFocus) ? t.put : t.take
   ui.bDisc.disabled = (!(openTarget && open > 0.65) && !discFocus && !(out > 0.5)) || (sheetK > 0 && !sheetDock)
   // Browse toggles disc-focus when disc is already out
@@ -177,7 +177,7 @@ function syncUI() {
   document.body.classList.toggle('disc-focus', discFocus)
 }
 function canOpen() { return !(outTarget || out > 0.02 || discFocus || hubPressTarget || (sheetT && sheetK < 1) || (!sheetT && sheetK > 0)) }
-let sheetK = 0, sheetT = 0, rotObj = 'case', sheetDock = false, dockK = 0, pendingSheetIn = false, discAway = 0
+let sheetK = 0, sheetT = 0, rotObj = 'case', sheetDock = false, dockK = 0, pendingSheetIn = false, pendingSheetOut = false, discAway = 0
 function canSheet() { return !(openTarget || open > 0.01 || outTarget || out > 0.01 || hubPressTarget || discFocus) }
 function toggleOpen() {
   if (!canOpen()) return
@@ -221,7 +221,8 @@ ui.lang.onclick = () => { lang = lang === 'en' ? 'zh' : 'en'; try { localStorage
 q('bEnv').onclick = () => { envName = ENV_KEYS[(ENV_KEYS.indexOf(envName) + 1) % ENV_KEYS.length]; applyEnv() }
 ui.bReset.onclick = () => { rot.reset(); if (controls.enabled) { resetT = 1; userMoved = false } }
 function putSheetBack() { rot.reset(); if (!canSheet()) { pendingSheetIn = true; sheetDock = true; if (discFocus || outTarget) reseatDisc(); openTarget = 0 } else { sheetDock = false; sheetT = 0 } syncUI() }
-ui.bSheet.onclick = () => { if (sheetT) putSheetBack(); else if (canSheet()) { sheetT = 1; sheetDock = false; rot.reset(); syncUI() } }
+// case open / disc out: close it (disc reseated) first, then slide the cover out (was: button disabled → "can't pull the cover")
+ui.bSheet.onclick = () => { if (sheetT) putSheetBack(); else if (canSheet()) { sheetT = 1; sheetDock = false; rot.reset(); syncUI() } else if (!pendingSheetOut) { pendingSheetOut = true; rot.reset(); if (discFocus || outTarget) reseatDisc(); openTarget = 0; syncUI() } }
 let flip = 0, flipT = 0
 ui.bFlip.onclick = () => { flipT = flipT ? 0 : 1 }
 q('back').href = BASE; q('toShowcase').href = BASE + 'showcase.html'; q('toShowcase').textContent = lang === 'en' ? '3D Showcase' : '3D 陈列柜'
@@ -315,6 +316,7 @@ function tick() {
   // ---- item rotation (camera fixed) + cover-sheet pull-out
   sheetK = step(sheetK, sheetT, dt, 2.2); dockK = step(dockK, sheetDock ? 1 : 0, dt, 0.7)
   if (pendingSheetIn && open < 0.01 && !openTarget && out < 0.01 && !outTarget) { pendingSheetIn = false; sheetDock = false; sheetT = 0; syncUI() }
+  if (pendingSheetOut && canSheet() && open < 0.01 && out < 0.01) { pendingSheetOut = false; sheetDock = false; sheetT = 1; rot.reset(); syncUI() }
   rot.update(dt)
   const act = discFocus ? 'disc' : sheetK > 0.34 && !sheetDock ? 'sheet' : 'case'
   if (act !== rotObj) { rotObj = act; rot.resetNow() }
