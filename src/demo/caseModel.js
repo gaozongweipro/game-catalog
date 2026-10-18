@@ -486,13 +486,16 @@ const R = 0.6, rH = 0.075, DT = 0.012
 const disc = new THREE.Group(); scene.add(disc) // world-space so browse mode is independent of case
 const dataMat = new THREE.MeshPhysicalMaterial({ color: 0x7d7396, metalness: 1, roughness: 0.14, anisotropy: 0.9, envMapIntensity: 0.9, iridescence: 1, iridescenceIOR: 1.8, iridescenceThicknessRange: [250, 950], side: THREE.DoubleSide })
 const mirrorMat = new THREE.MeshPhysicalMaterial({ color: 0xe8eaf2, metalness: 1, roughness: 0.04, side: THREE.DoubleSide })
-const clearMat = new THREE.MeshPhysicalMaterial({ color: 0xdfe6f0, roughness: 0.06, transparent: true, opacity: 0.22, ior: 1.58, specularIntensity: 1, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false })
+const clearMat = new THREE.MeshPhysicalMaterial({ color: 0xe6e8eb, roughness: 0.06, transparent: true, opacity: 0.22, ior: 1.58, specularIntensity: 1, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false })
+// outer label-side rim: clear, colourless polycarbonate (no tint, so nothing reads as a blue ring)
+const rimMat = new THREE.MeshPhysicalMaterial({ color: 0xeceef0, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.16, clearcoat: 1, depthWrite: false, side: THREE.DoubleSide })
 const labelMat = new THREE.MeshPhysicalMaterial({ roughness: 0.62, metalness: 0, envMapIntensity: 0.4, sheen: 0.25, sheenRoughness: 0.5, clearcoat: 0.12, clearcoatRoughness: 0.6 })
 const discPick = []
 function discRing(r0, r1, mat, z, flip) {
   const m = mesh(new THREE.RingGeometry(r0, r1, 128, 1), mat, disc, false); m.position.z = z; if (flip) m.rotation.y = Math.PI; discPick.push(m); return m
 }
 let labelRing, shadowDisc
+const labelClamp = { value: 1 } // label-art radius beyond which the art is radially clamped (photo labels: blue rim in the photo)
 if (!NSW) {
 // ---- Data side (BD): purple-tinted mirror data area 23–58.5 mm, clear 1.5 mm outer rim, mirror band, clear stacking ring.
 dataMat.color.set(0x8c86a8); dataMat.roughness = 0.05; dataMat.iridescence = 0.35; dataMat.envMapIntensity = 1.15; dataMat.anisotropy = 0.6
@@ -550,7 +553,15 @@ discRing(rH, 0.17, clearMat, 0, true)
   const m = mesh(new THREE.CircleGeometry(0.17, 64), new THREE.MeshPhysicalMaterial({ map: tx, alphaMap: tx, transparent: true, opacity: 0.62, roughness: 0.25, clearcoat: 1, depthWrite: false, side: THREE.DoubleSide }), disc, false)
   m.position.z = -0.0012; m.rotation.y = Math.PI; m.renderOrder = 6
 }
-labelRing = discRing(0.17, R - 0.002, labelMat, DT, false)
+// printed label stops 1.2 mm inside the edge (real BD: clear polycarbonate rim beyond the print); its outermost
+// band is a radial clamp of the art so photo-sourced labels (shot in the cobalt case) carry no blue tray/edge fringe
+labelRing = discRing(0.17, R - 0.012, labelMat, DT, false)
+discRing(R - 0.012, R - 0.001, rimMat, DT + 0.0002, false)
+labelMat.onBeforeCompile = (sh) => { sh.uniforms.uLClamp = labelClamp; sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#ifdef USE_MAP
+  vec2 lmd = vMapUv - 0.5; float lr = length(lmd) * 2.0; vec2 luv = lr > uLClamp ? 0.5 + lmd * (uLClamp / lr) : vMapUv;
+  diffuseColor *= texture2D( map, luv );
+#endif`).replace('void main() {', 'uniform float uLClamp;\nvoid main() {') }
+labelMat.customProgramCacheKey = () => 'disc-label-clamp'
 discRing(rH, 0.17, clearMat, DT, false)
 { const uv = labelRing.geometry.attributes.uv, p = labelRing.geometry.attributes.position; for (let i = 0; i < uv.count; i++) uv.setXY(i, p.getX(i) / (2 * R) + 0.5, p.getY(i) / (2 * R) + 0.5) }
 const edgeO = mesh(new THREE.CylinderGeometry(R, R, DT, 128, 1, true), clearMat, disc); edgeO.rotation.x = Math.PI / 2; edgeO.position.z = DT / 2; discPick.push(edgeO)
@@ -600,7 +611,7 @@ disc.position.copy(seatWorld(_seat))
   function setArt(art) {
     const old = [wrapPaper.map, wrapInnerPaper.map, labelMat.map, bkPaper.map]
     wrapPaper.map = wrapTex(art); wrapInnerPaper.map = wrapInnerTex(art)
-    labelMat.map = art.disc ? tex(art.disc) : null; bkPaper.map = art.booklet ? tex(art.booklet) : null
+    labelMat.map = art.disc ? tex(art.disc) : null; labelClamp.value = art.discClamp ?? 1; bkPaper.map = art.booklet ? tex(art.booklet) : null
     ;[wrapPaper, wrapInnerPaper, labelMat, bkPaper].forEach((m) => (m.needsUpdate = true))
     old.forEach((t) => t && t.dispose())
   }

@@ -318,6 +318,7 @@ export function buildArt(entry, imgs) {
     back: genBack(imgs.back, sl.back?.crop, cov, entry.title, color, band, P),
     innerCover: inner, innerTray: inner,
     disc: genDisc(imgs.disc, sl.disc?.crop, cov, entry.title, band, P, K),
+    discClamp: imgs.disc ? 0.93 : 1, // uploaded disc photos usually carry the case/tray colour in the clear rim
     booklet: genBooklet(cov, entry.title),
   }
 }
