@@ -193,10 +193,28 @@ def save8(arr, size, path):
     im.pixels.foreach_set(arr.astype(np.float32).ravel()); im.filepath_raw = path; im.file_format = 'PNG'; im.save()
 meta = {}
 sc.render.bake.use_pass_color = False
-raw = bake('DIFFUSE', 'light', RES, pass_filter={'DIRECT', 'INDIRECT'}); denoise(raw, OUT + 'light_dn.exr', RES)
-px, size = pixels(OUT + 'light_dn.exr'); rgb = np.maximum(px[..., :3], 0); lum = rgb.max(-1)
-scale = float(np.percentile(lum[lum > 1e-4], 99.6)); meta['lightScale'] = scale
-out = np.dstack([srgb(rgb / scale), np.ones(lum.shape)]); save8(out, size, OUT + 'light.png'); log('light scale', scale, 'p50', float(np.percentile(lum[lum > 1e-4], 50)))
+# Split bake: each light group gets its own lightmap so the runtime can mix them with per-group intensity / tint
+# (presets + sliders). spot = track washers + down-light, shelf = concealed uplights, world = HDRI fill (baked at
+# WORLD_BAKE strength, runtime default weight = WORLD / WORLD_BAKE). light.png = the authored mix (fallback).
+WORLD = float(os.environ.get('WORLD', '0.02')); WORLD_BAKE = float(os.environ.get('WORLD_BAKE', '0.2'))
+bg = wn.nodes['Background'].inputs['Strength']
+spots = [bpy.data.objects[n] for n in ('WashL', 'WashR', 'Down')]; shelfL = [bpy.data.objects['FLA%d' % i] for i in range(NSH)]
+COMP = {'spot': (spots, 0.0), 'shelf': (shelfL, 0.0), 'world': ([], WORLD_BAKE)}
+meta['components'] = {}; acc = None
+for name, (on, wstr) in COMP.items():
+    for o in spots + shelfL: o.hide_render = o not in on
+    bg.default_value = wstr
+    raw = bake('DIFFUSE', 'light_' + name, RES, pass_filter={'DIRECT', 'INDIRECT'}); denoise(raw, OUT + 'light_%s_dn.exr' % name, RES)
+    px, size = pixels(OUT + 'light_%s_dn.exr' % name); rgb = np.maximum(px[..., :3], 0); lum = rgb.max(-1)
+    sc_ = float(np.percentile(lum[lum > 1e-5], 99.6)) if (lum > 1e-5).any() else 1.0
+    w = WORLD / WORLD_BAKE if name == 'world' else 1.0
+    meta['components'][name] = {'scale': sc_, 'weight': w}
+    save8(np.dstack([srgb(rgb / sc_), np.ones(lum.shape)]), size, OUT + 'light_%s.png' % name); log('component', name, 'scale', sc_)
+    acc = rgb * w if acc is None else acc + rgb * w
+for o in spots + shelfL: o.hide_render = False
+bg.default_value = WORLD
+lum = acc.max(-1); scale = float(np.percentile(lum[lum > 1e-4], 99.6)); meta['lightScale'] = scale
+save8(np.dstack([srgb(acc / scale), np.ones(lum.shape)]), size, OUT + 'light.png'); log('light scale', scale)
 sc.cycles.samples = max(16, SAMPLES // 4)
 raw = bake('AO', 'ao', AO_RES); denoise(raw, OUT + 'ao_dn.exr', AO_RES)
 px, size = pixels(OUT + 'ao_dn.exr'); ao = np.clip(px[..., 0], 0, 1); save8(np.dstack([ao, ao, ao, np.ones(ao.shape)]), size, OUT + 'ao.png')
