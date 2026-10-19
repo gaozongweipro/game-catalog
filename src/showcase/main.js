@@ -110,8 +110,8 @@ let snapTimer = 0
 controls.addEventListener('end', () => { clearTimeout(snapTimer); if (mode === 'shelf') snapTimer = setTimeout(() => { if (mode === 'shelf') goCam(camShelfGoal()) }, 2600) })
 function applyLimits() {
   if (mode === 'shelf') {
-    Object.assign(controls, shelfLimits(), { enablePan: true, rotateSpeed: 0.5 })
-  } else Object.assign(controls, { minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity, minPolarAngle: 0.25, maxPolarAngle: Math.PI / 2 + 0.3, minDistance: 0.9, maxDistance: 9, enablePan: true, rotateSpeed: 1 })
+    Object.assign(controls, shelfLimits(), { enablePan: !spineClose(), enableRotate: !spineClose(), enableZoom: !spineClose(), rotateSpeed: 0.5 })
+  } else Object.assign(controls, { enableRotate: true, enableZoom: true, minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity, minPolarAngle: 0.25, maxPolarAngle: Math.PI / 2 + 0.3, minDistance: 0.9, maxDistance: 9, enablePan: true, rotateSpeed: 1 })
 }
 const _pc = new THREE.Vector3()
 function clampPan() {
@@ -462,7 +462,7 @@ async function streamTick() { // one proxy texture per frame-ish; keeps 200+ ite
   if (streaming || !streamQ.length) return; streaming = true
   const id = streamQ.shift(), e = entries.find((x) => x.id === id), m = proxies.get(id)
   if (e && m && isPh(m) && Math.abs((m.userData.cab ?? 0) - page) <= 1) {
-    const art = await getArt(e); if (proxies.get(id) === m && isPh(m)) { m.material = proxyMats(art, e.platform || 'ps5'); dirty = 2 }
+    const art = await getArt(e); if (proxies.get(id) === m && isPh(m)) { m.material = proxyMats(art, e.platform || 'ps5'); m.userData.hiSpine = false; dirty = 2; if (spineClose() && m.userData.home?.cab === page && m.userData.home?.shelf === shelfRow && !hiQ.includes(id)) hiQ.push(id) }
     if (!(sel && sel.id === id) && !(editing && editing.id === id)) artCache.delete(id) // keep only GPU textures; regenerate on inspect
   }
   streaming = false
@@ -472,7 +472,7 @@ function updateStreaming() {
   for (const [id, m] of proxies) {
     const d = Math.abs((m.userData.cab ?? 0) - page), shown = LAY.has(id)
     m.visible = shown && d <= 1 && !(sel && sel.id === id && (mode === 'inspect' || mode === 'editor'))
-    if (!shown || d > 1) { if (!isPh(m)) { freeMats(m); m.material = placeholderMats(m.userData.plat) } }
+    if (!shown || d > 1) { if (!isPh(m)) { freeMats(m); m.material = placeholderMats(m.userData.plat); m.userData.hiSpine = false } }
     else if (isPh(m)) streamQ.push(id)
   }
   streamQ.sort((a, b) => Math.abs(proxies.get(a).userData.cab - page) - Math.abs(proxies.get(b).userData.cab - page))
@@ -496,11 +496,12 @@ async function syncShelf(animate = true) {
 }
 async function refreshProxy(e) {
   artCache.delete(e.id); const m = proxies.get(e.id); if (!m) return
-  const art = await getArt(e); freeMats(m); m.geometry = proxyGeo(e.platform); fitDecal(m, e.platform); m.userData.plat = e.platform || 'ps5'; fitWall(m, m.userData.home); m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
+  const art = await getArt(e); freeMats(m); m.userData.hiSpine = false; m.geometry = proxyGeo(e.platform); fitDecal(m, e.platform); m.userData.plat = e.platform || 'ps5'; fitWall(m, m.userData.home); m.material = proxyMats(art, e.platform || 'ps5'); dirty = 3
 }
-function goPage(p, cam = true) {
+function goPage(p, cam = true, edge = -1) {
   p = THREE.MathUtils.clamp(p, 0, nCab - 1); if (p === page && cam) { goCam(camShelfGoal()); return }
-  page = p; placeLights(); updateStreaming(); syncPager(); scheduleProbes(); if (cam && mode === 'shelf') { goCam(camShelfGoal()); applyLimits() } dirty = 3
+  page = p; if (spineClose()) shelfX = rowEdgeX(edge) // enter the new cabinet at the row's start (or its end when panning back)
+  upgradeSpines(); placeLights(); updateStreaming(); syncPager(); scheduleProbes(); if (cam && mode === 'shelf') { goCam(camShelfGoal()); applyLimits() } dirty = 3
 }
 function syncPager() {
   const el = $('pager'); if (!el) return; el.classList.toggle('hidden', nCab <= 1)
@@ -699,8 +700,36 @@ function finishReturn() {
 const DOCK_OFF = new THREE.Vector3(-1.55, 0.62, -0.7), _dockP = new THREE.Vector3(), _cp = new THREE.Vector3(), _F = new THREE.Vector3()
 function inspCam(out) { const d = mobile && innerWidth < innerHeight ? 5.2 : 4.0; return out.copy(INS).add(_v2.set(0.75, 0.42, d)) }
 const _v2 = new THREE.Vector3()
-function setMode(m) { mode = m; applyLimits(); if (typeof updateStreaming === 'function' && entries.length) updateStreaming(); document.body.className = 'mode-' + m; $('inspect').classList.toggle('hidden', !(m === 'inspect')); $('empty').classList.toggle('hidden', entries.length > 0 || m !== 'shelf'); syncInspectUI(); dirty = 3 }
+function setMode(m) { mode = m; applyLimits(); syncShelfNav(); if (typeof updateStreaming === 'function' && entries.length) updateStreaming(); document.body.className = 'mode-' + m; $('inspect').classList.toggle('hidden', !(m === 'inspect')); $('empty').classList.toggle('hidden', entries.length > 0 || m !== 'shelf'); syncInspectUI(); dirty = 3 }
+// ---- spine mode: the camera frames ONE shelf, close enough that spine titles are legible (≈SPINE_TXT_PX CSS px glyphs),
+// and moves shelf to shelf (vertical swipe / wheel / ▲▼ / arrow keys) and along it (horizontal drag), across cabinets at
+// the ends. Front mode keeps the whole-cabinet framing. All moves are goals for the same critically damped camera follow.
+const SPINE_TXT = 0.06 // spine title glyph height in world units (≈48 px on the 800 px/unit print)
+const spineTxtPx = () => (innerWidth < 700 ? 13 : 16)
+let shelfRow = NSH - 1, shelfX = 0 // focused shelf (0 = bottom) and lateral offset of the view inside the cabinet
+const spineClose = () => viewMode === 'spine'
+function spineDist() {
+  const tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)
+  const dTxt = (SPINE_TXT * innerHeight) / (2 * tanH * spineTxtPx()), dCase = 1.95 / (2 * tanH) // never so close a case is cut
+  return Math.max(dTxt, dCase)
+}
+function spineHalfW(d = spineDist()) { return d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * (innerWidth / innerHeight) }
+/** view offset that puts the first (edge −1) or last (edge +1) case of the focused row at the screen edge; centred if the row fits */
+function rowEdgeX(edge, d = spineDist()) {
+  let lo = Infinity, hi = -Infinity; const cx = cabinetCenter().x
+  for (const [id, m] of proxies) { const L = m.userData.home; if (L && L.cab === page && L.shelf === shelfRow && LAY.has(id)) { lo = Math.min(lo, L.p.x - cx); hi = Math.max(hi, L.p.x - cx) } }
+  if (lo > hi) return 0; const hw = spineHalfW(d) * 0.9
+  if (hi - lo <= 2 * hw) return (lo + hi) / 2
+  return edge < 0 ? lo - 0.1 + hw : hi + 0.1 - hw
+}
+function shelfXMax(d = spineDist()) { return Math.max(0, CW / 2 + FT - spineHalfW(d) * 0.94) }
 function camShelfGoal() {
+  if (spineClose()) {
+    const c = cabinetCenter(), d = spineDist(), lim = shelfXMax(d)
+    shelfX = THREE.MathUtils.clamp(shelfX, -lim, lim)
+    const y = floorY(shelfRow) + 0.98, zF = 0.5 // spine faces stand at z ≈ 0.45–0.63
+    return { p: new THREE.Vector3(c.x + shelfX, y + 0.22, zF + d), t: new THREE.Vector3(c.x + shelfX, y, zF) }
+  }
   const c = cabinetCenter(), h = NSH * SP + PLINTH, aspect = innerWidth / innerHeight
   const fov = THREE.MathUtils.degToRad(camera.fov), distH = (h * 0.54) / Math.tan(fov / 2), distW = ((CW + 0.6) * 0.55) / (Math.tan(fov / 2) * aspect)
   const d = Math.max(distH, distW) + CD / 2
@@ -792,7 +821,7 @@ function shelfLimits() {
 const _par = new THREE.Vector3(), _sph = new THREE.Spherical()
 /** where the shelf camera actually rests: goal + pointer parallax, already inside the shelf OrbitControls limits */
 function shelfCamPose(g) {
-  const L = shelfLimits(), p = _par.copy(g.p); if (!qs.has('shot')) p.add(_v2.set(par.x * 0.5, -par.y * 0.3, 0))
+  const L = shelfLimits(), p = _par.copy(g.p); if (!qs.has('shot')) p.add(_v2.set(par.x * (spineClose() ? 0.18 : 0.5), -par.y * (spineClose() ? 0.12 : 0.3), 0))
   _sph.setFromVector3(p.sub(g.t)); _sph.phi = THREE.MathUtils.clamp(_sph.phi, L.minPolarAngle, L.maxPolarAngle); _sph.theta = THREE.MathUtils.clamp(_sph.theta, L.minAzimuthAngle, L.maxAzimuthAngle); _sph.radius = THREE.MathUtils.clamp(_sph.radius, L.minDistance, L.maxDistance)
   return { p: new THREE.Vector3().setFromSpherical(_sph).add(g.t), t: g.t.clone() }
 }
@@ -834,11 +863,101 @@ function syncInspectUI() {
   $('iEdit').disabled = !!sel.sample
 }
 
+// ---------------- spine mode navigation ----------------
+function shelfFilled(r) { for (const [id, m] of proxies) { const L = m.userData.home; if (L && L.cab === page && L.shelf === r && LAY.has(id)) return true } return false }
+function moveShelf(dir) { // dir +1 = shelf above
+  if (!spineClose() || mode !== 'shelf') return
+  let r = shelfRow + dir; while (r >= 0 && r < NSH && !shelfFilled(r) && shelfFilled(shelfRow)) r += dir // skip empty shelves
+  if (r < 0 || r >= NSH) { // past the bottom/top shelf → next/previous cabinet
+    if (dir < 0 && page < nCab - 1) { shelfRow = NSH - 1; goPage(page + 1) } else if (dir > 0 && page > 0) { shelfRow = 0; goPage(page - 1) } else bump(); return }
+  shelfRow = r; goCam(camShelfGoal()); upgradeSpines(); syncShelfNav(); dirty = 3 // same lateral position on the new shelf
+}
+function panShelf(frac) { // frac of the visible width; at an end, carries on into the neighbouring cabinet
+  if (!spineClose() || mode !== 'shelf') return
+  const lim = shelfXMax(), nx = shelfX + frac * 2 * spineHalfW()
+  if (nx > lim + 0.05 && shelfX >= lim - 0.01) { if (page < nCab - 1) goPage(page + 1, true, -1); else bump(); return }
+  if (nx < -lim - 0.05 && shelfX <= -lim + 0.01) { if (page > 0) goPage(page - 1, true, 1); else bump(); return }
+  shelfX = THREE.MathUtils.clamp(nx, -lim, lim); goCam(camShelfGoal()); syncShelfNav()
+}
+function bump() { dirty = 2 } // at the very end: no-op (the spring simply stays)
+function syncShelfNav() {
+  const on = mode === 'shelf' && spineClose(), el = $('shelfNav'); if (!el) return
+  el.classList.toggle('off', !on); if (!on) return
+  $('shUp').disabled = shelfRow >= NSH - 1 && page <= 0; $('shDn').disabled = shelfRow <= 0 && page >= nCab - 1
+}
+$('shUp').onclick = () => moveShelf(1); $('shDn').onclick = () => moveShelf(-1)
+// drag: horizontal follows the finger 1:1 (in world units at the spine plane); a vertical swipe changes shelf on release
+let sDrag = null
+cv.addEventListener('pointerdown', (e) => { if (mode === 'shelf' && spineClose()) sDrag = { x: e.clientX, y: e.clientY, x0: shelfX, t: performance.now(), lx: e.clientX, lt: performance.now(), v: 0, moved: false } })
+cv.addEventListener('pointermove', (e) => {
+  if (!sDrag || mode !== 'shelf' || !spineClose()) return
+  const dx = e.clientX - sDrag.x, dy = e.clientY - sDrag.y; if (!sDrag.moved && Math.hypot(dx, dy) > 8) sDrag.moved = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v'
+  if (sDrag.moved === 'h') {
+    const upp = (2 * spineHalfW()) / innerWidth, lim = shelfXMax(); let x = sDrag.x0 - dx * upp
+    if (x > lim) x = lim + (x - lim) * 0.25; if (x < -lim) x = -lim + (x + lim) * 0.25 // rubber band at the ends
+    const now = performance.now(); sDrag.v = (e.clientX - sDrag.lx) / Math.max(1, now - sDrag.lt); sDrag.lx = e.clientX; sDrag.lt = now
+    shelfX = x; camGoal = camShelfGoalRaw(); auto = true; dirty = 2
+  }
+})
+function camShelfGoalRaw() { const keep = shelfX, g = camShelfGoal(); shelfX = keep; const lim = shelfXMax(); if (Math.abs(keep) > lim) { const dx = keep - THREE.MathUtils.clamp(keep, -lim, lim); g.p.x += dx; g.t.x += dx } return g }
+const endDrag = (e) => {
+  const d = sDrag; sDrag = null; if (!d || mode !== 'shelf' || !spineClose()) return
+  const dx = e.clientX - d.x, dy = e.clientY - d.y, lim = shelfXMax(), upp = (2 * spineHalfW()) / innerWidth
+  if (d.moved === 'v' && Math.abs(dy) > 40) { moveShelf(dy < 0 ? -1 : 1); return } // swipe up → the shelf below comes up
+  if (d.moved === 'h') {
+    const over = shelfX - THREE.MathUtils.clamp(shelfX, -lim, lim)
+    if (over > spineHalfW() * 0.12 && page < nCab - 1) { goPage(page + 1, true, -1); return }
+    if (over < -spineHalfW() * 0.12 && page > 0) { goPage(page - 1, true, 1); return }
+    shelfX = THREE.MathUtils.clamp(shelfX - d.v * upp * 220, -lim, lim) // short fling
+    goCam(camShelfGoal()); syncShelfNav()
+  }
+}
+cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag)
+let wheelAt = 0
+cv.addEventListener('wheel', (e) => {
+  if (mode !== 'shelf' || !spineClose()) return
+  e.preventDefault(); const now = performance.now()
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) { const d = e.shiftKey ? e.deltaY : e.deltaX; shelfX = THREE.MathUtils.clamp(shelfX + d * ((2 * spineHalfW()) / innerWidth), -shelfXMax(), shelfXMax()); goCam(camShelfGoal()); return }
+  if (now - wheelAt < 420 || Math.abs(e.deltaY) < 4) return; wheelAt = now; moveShelf(e.deltaY > 0 ? -1 : 1)
+}, { passive: false })
+/** focus the shelf holding `id` (spine mode), centre it laterally and pulse-highlight it */
+function focusItem(id) {
+  const L = LAY.get(id), m = proxies.get(id); if (!L || !m) return
+  const T = layoutTarget(id); if (T.cab !== page) goPage(T.cab, false)
+  if (spineClose()) { shelfRow = T.shelf; shelfX = T.p.x - cabinetCenter().x }
+  goCam(camShelfGoal()); applyLimits(); upgradeSpines(); syncShelfNav(); highlight(m)
+}
+const hl = new Map()
+function highlight(m) { hl.set(m, 0); dirty = 3 }
+function tickHighlight(dt) {
+  for (const [m, t0] of hl) {
+    const t = t0 + dt, k = t < 2.4 ? Math.sin(Math.min(1, t / 2.4) * Math.PI) * (0.55 + 0.45 * Math.cos(t * 7.5)) : 0
+    const mats = Array.isArray(m.material) ? m.material.slice(1) : []
+    for (const x of mats) if (x.emissive) { x.emissive.setRGB(1, 0.78, 0.45); x.emissiveIntensity = 0.55 * Math.max(0, k) }
+    if (t >= 2.4) { for (const x of mats) if (x.emissive) x.emissiveIntensity = 0; hl.delete(m) } else hl.set(m, t)
+  }
+  return hl.size > 0
+}
+// spine textures: the focused shelf (current cabinet) gets full print resolution; the rest stay at TEXMAX
+const SPINE_HI = 2048
+let hiQ = [], hiBusy = false
+function upgradeSpines() {
+  if (!spineClose()) return
+  hiQ = []; for (const [id, m] of proxies) { const L = m.userData.home; if (L && L.cab === page && Math.abs(L.shelf - shelfRow) <= 0 && !m.userData.hiSpine && LAY.has(id)) hiQ.push(id) }
+}
+async function hiTick() {
+  if (hiBusy || !hiQ.length || streaming) return; const id = hiQ[0], m = proxies.get(id), e = entries.find((x) => x.id === id)
+  if (!m || !e || isPh(m)) { if (!m || !e) hiQ.shift(); return } // placeholder still streaming: wait for it
+  hiQ.shift(); hiBusy = true
+  try { const art = await getArt(e); if (proxies.get(id) === m && !isPh(m) && Array.isArray(m.material)) { const mat = m.material[1], old = mat.map; mat.map = shrink(art.spine, SPINE_HI); mat.needsUpdate = true; old?.dispose(); m.userData.hiSpine = true; dirty = 2 }
+    if (!(sel && sel.id === id) && !(editing && editing.id === id)) artCache.delete(id) } finally { hiBusy = false }
+}
+
 // ---------------- picking ----------------
 const ray = new THREE.Raycaster(), ptr = new THREE.Vector2(); let downAt = null
 cv.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY, performance.now()]; closeMenus(); if (mode === 'inspect') interrupt() })
 cv.addEventListener('pointerup', (e) => {
-  if (downAt && mode === 'shelf') { const dx = e.clientX - downAt[0], dy = e.clientY - downAt[1]; if (Math.abs(dx) > 90 && Math.abs(dx) > 2 * Math.abs(dy)) { goPage(page + (dx < 0 ? 1 : -1)); return } }
+  if (downAt && mode === 'shelf' && !spineClose()) { const dx = e.clientX - downAt[0], dy = e.clientY - downAt[1]; if (Math.abs(dx) > 90 && Math.abs(dx) > 2 * Math.abs(dy)) { goPage(page + (dx < 0 ? 1 : -1)); return } }
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 8 || performance.now() - downAt[2] > 600) return
   ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ptr, camera)
   if (mode === 'shelf') { const hit = ray.intersectObjects([...proxies.values()])[0]; if (hit) selectEntry(hit.object.userData.id); return }
@@ -867,7 +986,7 @@ function tick() {
   // doors
   if (owns('door')) busy = true
   doors.forEach((p) => (p.rotation.y = p.userData.ci === page ? p.userData.sx * doorOpen * THREE.MathUtils.degToRad(105) : 0))
-  streamTick()
+  streamTick(); hiTick(); if (tickHighlight(dt)) busy = true
   // shelf glides / pops
   for (const m of proxies.values()) {
     if (m.userData.glide) { const g = m.userData.glide; g.t = Math.min(1, g.t + dt / 0.6); const k = ease(g.t); m.position.lerpVectors(g.from, m.userData.home.p, k); _q.setFromEuler(m.userData.home.r); m.quaternion.slerpQuaternions(g.q0, _q, k); if (g.t >= 1) delete m.userData.glide; busy = true }
@@ -903,7 +1022,7 @@ function tick() {
     // the case steps aside while the flat sheet (undocked) or the disc is presented
     // (disc focus: caseAway channel; sheet: keyed to the sheet's own progress so the case only starts to move once the
     // sheet's bottom edge has cleared the case top, and is back home before the sheet re-enters the sleeve)
-    const away = awayNow(); if (away > 0) busy = true
+    const away = awayNow(); if (away !== tick._aw) { tick._aw = away; busy = true } // only while it changes: a case parked aside is not motion (kept the LOD on forever)
     const R = model.root, oe = open
     if ((mode === 'return' || mode === 'back') && flight) { flyPose(flight.u, _fp, _fq); holder.quaternion.copy(_fq); holder.position.copy(_fp).sub(_v.set(0, Hm() / 2, 0).applyQuaternion(_fq)) }
     else { holder.position.copy(INS).sub(_v.set(0, Hm() / 2, 0)); holder.rotation.set(0, 0, 0) }
@@ -981,7 +1100,7 @@ function setupTier() {
     // EffectComposer bypasses the canvas MSAA → render into a 4× multisampled HDR target (WebGL2) instead
     const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: renderer.capabilities.isWebGL2 === false ? 0 : 4 })
     composer = new EffectComposer(renderer, rt); composer.addPass(new RenderPass(scene, camera))
-    if (tier === 'high') { gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); const ov = gtao._overrideVisibility.bind(gtao); gtao._overrideVisibility = function () { ov(); const c = this._visibilityCache; this.scene.traverse((o) => { if (o.isMesh && o.visible && o.material?.userData?.noAO) { o.visible = false; c.push(o) } }) }; gtao.blendIntensity = 0.6; gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1, scale: 1 }); composer.addPass(gtao) }
+    if (tier === 'high') { gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); const ov = gtao._overrideVisibility.bind(gtao); gtao._overrideVisibility = function () { ov(); const c = this._visibilityCache; this.scene.traverse((o) => { if (o.isMesh && o.visible && o.material?.userData?.noAO) { o.visible = false; c.push(o) } }) }; gtao.blendIntensity = GTAO_BLEND * aoW; gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1, scale: 1 }); composer.addPass(gtao) }
     bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.55, 1.6); composer.addPass(bloom)
     vignette = new ShaderPass(VignetteShader); composer.addPass(vignette); composer.addPass(new OutputPass())
     if (tier === 'high') composer.addPass(new SMAAPass()) // after tone mapping: cleans AO / specular edges MSAA can't see
@@ -1020,19 +1139,22 @@ function sampleTone() {
   const pick = worst(alt) > worst(cur) * 1.08 ? alt : cur; $('brand').dataset.tone = $('ihead').dataset.tone = pick; out.tone = pick
   window.__tone = out
 }
-// While the user turns an item (and while it settles): skip GTAO, freeze the shadow map, and if frames are still slow
-// drop the composer to 1× resolution. Everything is restored ~0.25 s after the item comes to rest.
-let lodOn = false, lodIdle = 0, lodSlow = 0, lodDpr = false
+// While an item moves or the user turns it: GTAO is faded out, the shadow map refreshes at half rate, and only while the
+// user actively DRAGS (motion masks it) a slow device drops the composer to 1× resolution. Nothing is toggled in one frame:
+// GTAO fades back in over ~0.3 s once everything rests (0.25 s idle), shadows return to every frame, so a scripted
+// animation (cover out / back, disc, return) never ends in a visible pop.
+let lodOn = false, lodIdle = 0, lodSlow = 0, lodDpr = false, aoW = 1, aoP = 1, lodF = 0
+const GTAO_BLEND = 0.6
 function interactionLOD(active, dt) {
-  if (active) {
-    lodIdle = 0
-    if (!lodOn) { lodOn = true; if (gtao) gtao.enabled = false; renderer.shadowMap.autoUpdate = false }
-    if (dt > 0.024) { if (++lodSlow > 20 && !lodDpr && composer && renderer.getPixelRatio() > 1) { lodDpr = true; composer.setPixelRatio(1) } } else lodSlow = Math.max(0, lodSlow - 1)
-  } else if (lodOn && (lodIdle += dt) > 0.25) {
-    lodOn = false; lodSlow = 0; if (gtao) gtao.enabled = true; renderer.shadowMap.autoUpdate = true; renderer.shadowMap.needsUpdate = true
-    if (lodDpr) { lodDpr = false; composer?.setPixelRatio(renderer.getPixelRatio()) }
-    dirty = 3
+  if (active) { lodIdle = 0; lodOn = true } else if (lodOn && (lodIdle += dt) > 0.25) lodOn = false
+  if (gtao) {
+    const aoT = lodOn ? 0 : 1; if (aoP !== aoT) { aoP = aoT > aoP ? Math.min(aoT, aoP + dt / 0.45) : Math.max(aoT, aoP - dt / 0.2); dirty = Math.max(dirty, 1) }
+    aoW = aoP * aoP * aoP * (aoP * (aoP * 6 - 15) + 10) // smootherstep: the fade starts and ends with zero rate
+    gtao.blendIntensity = GTAO_BLEND * aoW; gtao.enabled = aoW > 0.002
   }
+  if (lodOn) { renderer.shadowMap.autoUpdate = false; if ((++lodF & 1) === 0) renderer.shadowMap.needsUpdate = true } else if (!renderer.shadowMap.autoUpdate) { renderer.shadowMap.autoUpdate = true; renderer.shadowMap.needsUpdate = true }
+  if (rot.dragging && dt > 0.024) { if (++lodSlow > 20 && !lodDpr && composer && renderer.getPixelRatio() > 1) { lodDpr = true; composer.setPixelRatio(1) } }
+  else { lodSlow = Math.max(0, lodSlow - 1); if (lodDpr && !rot.dragging) { lodDpr = false; composer?.setPixelRatio(renderer.getPixelRatio()); dirty = Math.max(dirty, 1) } }
 }
 // auto-downgrade: if active frames stay slow, drop one tier (never upgrades back automatically)
 const perf = []
@@ -1076,7 +1198,8 @@ function syncViewBtn() { tbSet('tView', { label: t(viewMode === 'spine' ? 'vSpin
 function setView(v) {
   viewMode = v; localStorage.setItem('showcase-view', v); syncViewBtn()
   for (const b of $('viewSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === v))
-  syncShelf(true).then(() => { if (mode === 'shelf') goCam(camShelfGoal()) })
+  if (v === 'spine') shelfRow = NSH - 1; applyLimits(); syncShelfNav()
+  syncShelf(true).then(() => { if (v === 'spine') shelfX = rowEdgeX(-1); if (mode === 'shelf') { applyLimits(); goCam(camShelfGoal()); upgradeSpines() } })
 }
 $('tView').onclick = () => { if (mode === 'shelf') setView(viewMode === 'spine' ? 'front' : 'spine') }
 $('tView').classList.remove('hidden')
@@ -1128,7 +1251,7 @@ async function move(dir) {
 $('iLeft').onclick = () => move(-1); $('iRight').onclick = () => move(1)
 $('iEdit').onclick = () => { closeMenus(); if (sel.sample) return toast(t('sampleRO')); openEditor(sel) }
 $('makeBtn').onclick = () => openEditor(null); $('emptyBtn').onclick = () => openEditor(null)
-addEventListener('keydown', (e) => { if (mode === 'shelf' && document.activeElement?.tagName !== 'INPUT') { if (e.key === 'ArrowRight') goPage(page + 1); if (e.key === 'ArrowLeft') goPage(page - 1) } if (e.key === 'Escape' && $('dlg').classList.contains('hidden')) { if (mode === 'editor') { if (!$('crop').classList.contains('hidden')) $('cDone').onclick(); else cancelEditor() } else if (mode === 'inspect') { if (discFocus) reseat(); else backToShelf() } } })
+addEventListener('keydown', (e) => { if (mode === 'shelf' && document.activeElement?.tagName !== 'INPUT') { if (spineClose()) { if (e.key === 'ArrowUp') moveShelf(1); if (e.key === 'ArrowDown') moveShelf(-1); if (e.key === 'ArrowRight') panShelf(0.6); if (e.key === 'ArrowLeft') panShelf(-0.6) } else { if (e.key === 'ArrowRight') goPage(page + 1); if (e.key === 'ArrowLeft') goPage(page - 1) } } if (e.key === 'Escape' && $('dlg').classList.contains('hidden')) { if (mode === 'editor') { if (!$('crop').classList.contains('hidden')) $('cDone').onclick(); else cancelEditor() } else if (mode === 'inspect') { if (discFocus) reseat(); else backToShelf() } } })
 
 // ---------------- editor ----------------
 let draftDirty = false, editing = null, draft = null, draftImgs = {}, draftArt = null, cropKey = null, artTimer = 0, prevSel = null, prevMode = null
@@ -1364,9 +1487,9 @@ $('cZoomIn').onclick = () => setZoom(cropState.s * 1.15); $('cZoomOut').onclick 
 $('cDone').onclick = () => { $('crop').classList.add('hidden'); rebuildDraft(); renderSlots() }
 addEventListener('resize', () => { if (!$('crop').classList.contains('hidden')) drawCrop() })
 
-$('pgPrev').onclick = () => goPage(page - 1); $('pgNext').onclick = () => goPage(page + 1); $('pgJump').onchange = (e) => goPage(+e.target.value)
+$('pgPrev').onclick = () => goPage(page - 1); $('pgNext').onclick = () => goPage(page + 1); $('pgJump').onchange = (e) => { shelfRow = NSH - 1; goPage(+e.target.value) }
 let qTimer = 0
-$('q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { fQuery = $('q').value; page = 0; syncFilterDot(); syncShelf(true).then(() => goPage(0)) }, 250) }
+$('q').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => { fQuery = $('q').value; page = 0; syncFilterDot(); syncShelf(true).then(() => { if (fQuery && view.length) focusItem(view[0].id); else { shelfRow = NSH - 1; if (page === 0) { shelfX = rowEdgeX(-1); goCam(camShelfGoal()) } goPage(0) } }) }, 250) }
 $('pf').onclick = (e) => { const v = e.target.dataset?.p; if (!v) return; fPlat = v; syncFilterDot(); for (const b of $('pf').children) b.setAttribute('aria-pressed', String(b.dataset.p === v)); page = 0; syncShelf(true).then(() => goPage(0)) }
 $('sort').value = fSort; $('sort').onchange = (e) => { fSort = e.target.value; syncFilterDot(); localStorage.setItem('showcase-sort', fSort); syncShelf(true) }
 // ---------------- environment & lighting presets ----------------
@@ -1460,12 +1583,13 @@ async function boot() {
   } catch (err) { console.warn('IndexedDB unavailable', err) }
   await bakedReady
   await syncShelf(false)
+  if (spineClose()) { shelfX = rowEdgeX(-1); upgradeSpines() }
   const g = camShelfGoal(); camera.position.copy(g.p).add(new THREE.Vector3(0.8, 0.6, 2.2)); controls.target.copy(g.t); goCam(g)
   controls.minDistance = 1.2; controls.maxDistance = 22
   resize(); dirty = 5
   setTimeout(() => $('loading').classList.add('fade'), 250)
   setMode('shelf')
-  window.__sc = { stepFrame: (d = 1 / 30) => { renderer.setAnimationLoop(null); forceDt = d; tick(); forceDt = 0; return mode }, resume: () => { clock.getDelta(); renderer.setAnimationLoop(tick) }, cg: () => ({ goal: camShelfGoal().p.toArray(), cam: camera.position.toArray(), tgt: controls.target.toArray(), gt: camShelfGoal().t.toArray(), to: camTo && camTo.p.toArray() }), probe: () => { const p = sel && proxies.get(sel.id), c = new THREE.Vector3(), q = new THREE.Quaternion(); if (holder.visible) { model.root.getWorldPosition(c); model.root.getWorldQuaternion(q) } else if (p) { c.copy(p.position); q.copy(p.quaternion) } const d = model.disc.getWorldPosition(new THREE.Vector3()); return { t: +simT.toFixed(4), mode, hv: holder.visible, pv: p ? p.visible : null, c: c.toArray(), q: q.toArray(), d: d.toArray(), cam: camera.position.toArray(), tg: controls.target.toArray(), ps: p ? p.scale.x : null, dec: p ? p.userData.decal.visible : null, ao: gtao ? gtao.enabled : null, sau: renderer.shadowMap.autoUpdate, lod: lodOn, lodDpr, tier, open, out, sk: sheetK, door: doorOpen, hub: hubP } }, vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, glb: () => model.glbParts,
+  window.__sc = { stepFrame: (d = 1 / 30) => { renderer.setAnimationLoop(null); forceDt = d; tick(); forceDt = 0; return mode }, resume: () => { clock.getDelta(); renderer.setAnimationLoop(tick) }, cg: () => ({ goal: camShelfGoal().p.toArray(), cam: camera.position.toArray(), tgt: controls.target.toArray(), gt: camShelfGoal().t.toArray(), to: camTo && camTo.p.toArray() }), probe: () => { const p = sel && proxies.get(sel.id), c = new THREE.Vector3(), q = new THREE.Quaternion(); if (holder.visible) { model.root.getWorldPosition(c); model.root.getWorldQuaternion(q) } else if (p) { c.copy(p.position); q.copy(p.quaternion) } const d = model.disc.getWorldPosition(new THREE.Vector3()); return { t: +simT.toFixed(4), mode, hv: holder.visible, pv: p ? p.visible : null, c: c.toArray(), q: q.toArray(), d: d.toArray(), cam: camera.position.toArray(), tg: controls.target.toArray(), ps: p ? p.scale.x : null, dec: p ? p.userData.decal.visible : null, ao: gtao ? gtao.enabled : null, sau: renderer.shadowMap.autoUpdate, lod: lodOn, lodDpr, tier, pr: renderer.getPixelRatio(), cpr: composer ? composer._pixelRatio : null, tone: $('ihead').dataset.tone, away: +awayNow().toFixed(3), vig: vignette ? +vignette.uniforms.uAmt.value.toFixed(3) : null, sm: renderer.shadowMap.needsUpdate, open, out, sk: sheetK, door: doorOpen, hub: hubP } }, vis: () => { const p = sel && proxies.get(sel.id); let shelf = 0; for (const m of proxies.values()) if (m.visible) shelf++; return { holder: holder.visible && model.root.visible, disc: model.disc.visible, selProxy: p ? p.visible : null, shelf, mode, mem: { ...renderer.info.memory }, kids: model.root.children.length, sheetKids: model.sheetG.children.length, sheetParent: model.sheetG.parent === model.root, dock: sheetDock, open: +open.toFixed(2), out: +out.toFixed(2), discFocus } }, back: () => backToShelf(), click: (id) => $(id).click(), cam: () => camera.position.toArray().map((v) => +v.toFixed(4)), sheet: (v) => { if (v != null) $('iSheet').click(); return +sheetK.toFixed(2) }, rot: (y, p) => { if (y != null) { rot.set(y, p || 0); dirty = 3 } return { yaw: +rot.yaw.toFixed(2), pitch: +rot.pitch.toFixed(2), obj: rotObj, zoom: +rot.zoom.toFixed(2) } }, tier: (t) => { if (t) { tier = t; pinned = true; setupTier() } return tier + ' ' + gpuName }, bulk: async (n) => { const P = ['ps5', 'ns', 'ns2']; for (let i = 0; i < n; i++) entries.push({ id: 'bulk' + i, title: `Test Game ${String(i + 1).padStart(3, '0')}`, platform: P[i % 3], order: entries.length, createdAt: Date.now() - i * 1e6, slots: {} }); await syncShelf(false); goCam(camShelfGoal()); return nCab }, page: () => [page, nCab], goPage: (p) => goPage(p), fps: () => renderer.info.render.calls, entries: () => entries.map((e) => e.title), info: () => entries.map((e) => ({ t: e.title, p: e.platform, front: !!e.slots?.front?.blob, auto: !!e.slots?.front?.auto, band: e.band, src: e.lookup?.src })), sugg: () => lkResults.map((r) => r.src + ':' + r.title + ':' + r.platform), plats: () => entries.map((e) => e.platform), kind: () => model.kind, glb: () => model.glbParts,
     // debug: visible meshes (outside the disc group) whose world bounds come within r of the presented disc
     near: (r = 0.9) => { const c = model.disc.getWorldPosition(new THREE.Vector3()), out = [], bs = new THREE.Sphere(); scene.traverseVisible((o) => { if (!o.isMesh) return; for (let p = o; p; p = p.parent) if (p === model.disc) return; if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere(); bs.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld); const d = bs.center.distanceTo(c) - bs.radius; if (d < r) { let path = o.name || o.type; for (let p = o.parent; p && p !== scene; p = p.parent) path = (p.name || 'g') + '/' + path; out.push([+d.toFixed(2), path, o.material?.name || o.material?.type]) } }); return out.sort((a, b) => a[0] - b[0]).slice(0, 30) }, door: (v) => { doorTarget = v; dirty = 3 }, env: (p) => { if (p && PRESETS[p]) { env = envDefaults(p); applyEnv(false); renderEnvUI() } return { ...env, split: !!BAKED?.split } }, editor: () => draft, mode: () => mode, state: () => ({ open: +open.toFixed(2), out: +out.toFixed(2), discFocus }), select: (i) => selectEntry(entries[i].id), screen: (i) => { const v = proxies.get(entries[i].id).position.clone().project(camera); return [(v.x + 1) / 2 * innerWidth, (1 - v.y) / 2 * innerHeight] } }
   // debug: sheet ⟂ shell intersection test. Sheet print faces are sampled on a grid; every grid edge is ray-cast against the
@@ -1483,6 +1607,10 @@ async function boot() {
     const vo = camera.view && camera.view.enabled ? [camera.view.offsetX, camera.view.offsetY] : null, r = renderer.domElement.getBoundingClientRect()
     return { mode, what, vis: mode === 'inspect' ? visibleNdc().map((v) => +v.toFixed(3)) : null, cam3: camera.position.distanceTo(controls.target).toFixed(2), cab: pr(cab), foc: pr(f), focPivot: fc && [+fc.x.toFixed(4), +fc.y.toFixed(4)], vo, canvas: [r.left, r.width, innerWidth, renderer.domElement.width], par: par.toArray(), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
   }
+  window.__sc.spine = (cmd) => { if (cmd === 'up') moveShelf(1); if (cmd === 'down') moveShelf(-1); if (cmd === 'right') panShelf(0.6); if (cmd === 'left') panShelf(-0.6); if (cmd && cmd.focus != null) focusItem(entries[cmd.focus].id)
+    const zF = 0.55, dz = camera.position.z - zF, tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); let hi = 0, tot = 0, texH = 0
+    for (const [, m] of proxies) { const L = m.userData.home; if (L && L.cab === page && L.shelf === shelfRow && m.visible) { tot++; if (m.userData.hiSpine) hi++; const mp = Array.isArray(m.material) && m.material[1]?.map; if (mp?.image) texH = Math.max(texH, mp.image.height || 0) } }
+    return { view: viewMode, row: shelfRow, x: +shelfX.toFixed(3), page, nCab, d: +dz.toFixed(3), txtPx: +((SPINE_TXT * innerHeight) / (2 * tanH * dz)).toFixed(2), hi, tot, texH, auto, mode, hl: hl.size, cam: camera.position.toArray().map((v) => +v.toFixed(2)) } }
   window.__sc.dims = () => { model.root.updateMatrixWorld(true); const inv = model.root.matrixWorld.clone().invert(), out = {}; model.root.traverse((o) => { if (o.isMesh && o.material === model.shellMat && o.visible) { const b = new THREE.Box3().setFromObject(o, true).applyMatrix4(inv); out[o.name || o.geometry.type + o.id] = [b.min.toArray().map((v) => +v.toFixed(4)), b.max.toArray().map((v) => +v.toFixed(4))] } }); return { W: model.W, H: model.H, D: model.D, HALF: model.HALF, out } }
   window.__sc.clip = (rows = 9) => {
     scene.updateMatrixWorld(true)
