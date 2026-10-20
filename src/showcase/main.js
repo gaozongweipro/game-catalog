@@ -110,8 +110,17 @@ let snapTimer = 0
 controls.addEventListener('end', () => { clearTimeout(snapTimer); if (mode === 'shelf') snapTimer = setTimeout(() => { if (mode === 'shelf') goCam(camShelfGoal()) }, 2600) })
 function applyLimits() {
   if (mode === 'shelf') {
-    Object.assign(controls, shelfLimits(), { enablePan: !spineClose(), enableRotate: !spineClose(), enableZoom: !spineClose(), rotateSpeed: 0.5 })
-  } else Object.assign(controls, { enableRotate: true, enableZoom: true, minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity, minPolarAngle: 0.25, maxPolarAngle: Math.PI / 2 + 0.3, minDistance: 0.9, maxDistance: 9, enablePan: true, rotateSpeed: 1 })
+    const close = spineClose()
+    // spine close-up owns the camera (vertical shelf change + horizontal pan). OrbitControls must be fully
+    // disabled or it captures the pointer and a vertical swipe never becomes a row change.
+    Object.assign(controls, shelfLimits(), {
+      enabled: !close, enablePan: !close, enableRotate: !close, enableZoom: !close, rotateSpeed: 0.5,
+    })
+  } else Object.assign(controls, {
+    enabled: true, enableRotate: true, enableZoom: true, enablePan: true,
+    minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity, minPolarAngle: 0.25, maxPolarAngle: Math.PI / 2 + 0.3,
+    minDistance: 0.9, maxDistance: 9, rotateSpeed: 1,
+  })
 }
 const _pc = new THREE.Vector3()
 function clampPan() {
@@ -490,7 +499,7 @@ async function syncShelf(animate = true) {
     if (!animate || m.userData.fresh || Math.abs(L.cab - page) > 1) { m.position.copy(L.p); m.rotation.copy(L.r); if (m.userData.fresh && animate && Math.abs(L.cab - page) <= 1) { m.scale.setScalar(0.001); m.userData.pop = 0 } m.userData.fresh = false }
     else m.userData.glide = { from: m.position.clone(), q0: m.quaternion.clone(), t: 0 }
   }
-  updateStreaming(); syncPager()
+  updateStreaming(); syncPager(); syncShelfNav()
   $('empty').classList.toggle('hidden', entries.length > 0 || mode !== 'shelf')
   dirty = 3
 }
@@ -501,7 +510,7 @@ async function refreshProxy(e) {
 function goPage(p, cam = true, edge = -1) {
   p = THREE.MathUtils.clamp(p, 0, nCab - 1); if (p === page && cam) { goCam(camShelfGoal()); return }
   page = p; if (spineClose()) shelfX = rowEdgeX(edge) // enter the new cabinet at the row's start (or its end when panning back)
-  upgradeSpines(); placeLights(); updateStreaming(); syncPager(); scheduleProbes(); if (cam && mode === 'shelf') { goCam(camShelfGoal()); applyLimits() } dirty = 3
+  upgradeSpines(); placeLights(); updateStreaming(); syncPager(); syncShelfNav(); scheduleProbes(); if (cam && mode === 'shelf') { goCam(camShelfGoal()); applyLimits() } dirty = 3
 }
 function syncPager() {
   const el = $('pager'); if (!el) return; el.classList.toggle('hidden', nCab <= 1)
@@ -865,12 +874,38 @@ function syncInspectUI() {
 
 // ---------------- spine mode navigation ----------------
 function shelfFilled(r) { for (const [id, m] of proxies) { const L = m.userData.home; if (L && L.cab === page && L.shelf === r && LAY.has(id)) return true } return false }
-function moveShelf(dir) { // dir +1 = shelf above
+/** next filled shelf in `dir` (+1 = above), or null if none in this cabinet */
+function nextFilledShelf(from, dir) {
+  let r = from + dir
+  while (r >= 0 && r < NSH) { if (shelfFilled(r)) return r; r += dir }
+  return null
+}
+function canMoveShelf(dir) {
+  if (!spineClose() || mode !== 'shelf') return false
+  if (nextFilledShelf(shelfRow, dir) != null) return true
+  if (dir < 0) return page < nCab - 1 // past bottom → next cabinet
+  return page > 0 // past top → previous cabinet
+}
+function moveShelf(dir) { // dir +1 = shelf above (higher Y), −1 = shelf below
   if (!spineClose() || mode !== 'shelf') return
-  let r = shelfRow + dir; while (r >= 0 && r < NSH && !shelfFilled(r) && shelfFilled(shelfRow)) r += dir // skip empty shelves
-  if (r < 0 || r >= NSH) { // past the bottom/top shelf → next/previous cabinet
-    if (dir < 0 && page < nCab - 1) { shelfRow = NSH - 1; goPage(page + 1) } else if (dir > 0 && page > 0) { shelfRow = 0; goPage(page - 1) } else bump(); return }
-  shelfRow = r; goCam(camShelfGoal()); upgradeSpines(); syncShelfNav(); dirty = 3 // same lateral position on the new shelf
+  const hit = nextFilledShelf(shelfRow, dir)
+  if (hit != null) {
+    shelfRow = hit; shelfPreview = 0; goCam(camShelfGoal()); upgradeSpines(); syncShelfNav(); dirty = 3
+    return
+  }
+  // past the last filled shelf in this cabinet → adjacent cabinet (land on its nearest filled shelf)
+  if (dir < 0 && page < nCab - 1) {
+    shelfRow = NSH - 1; shelfPreview = 0; goPage(page + 1)
+    // goPage is async via place; snap to topmost filled after layout settles
+    queueMicrotask(() => { const t = nextFilledShelf(NSH, -1); if (t != null) shelfRow = t; goCam(camShelfGoal()); upgradeSpines(); syncShelfNav() })
+    return
+  }
+  if (dir > 0 && page > 0) {
+    shelfRow = 0; shelfPreview = 0; goPage(page - 1)
+    queueMicrotask(() => { const t = nextFilledShelf(-1, 1); if (t != null) shelfRow = t; goCam(camShelfGoal()); upgradeSpines(); syncShelfNav() })
+    return
+  }
+  bump()
 }
 function panShelf(frac) { // frac of the visible width; at an end, carries on into the neighbouring cabinet
   if (!spineClose() || mode !== 'shelf') return
@@ -880,45 +915,80 @@ function panShelf(frac) { // frac of the visible width; at an end, carries on in
   shelfX = THREE.MathUtils.clamp(nx, -lim, lim); goCam(camShelfGoal()); syncShelfNav()
 }
 function bump() { dirty = 2 } // at the very end: no-op (the spring simply stays)
+let shelfPreview = 0 // live vertical drag offset in world units (rubber-band toward neighbour)
 function syncShelfNav() {
   const on = mode === 'shelf' && spineClose(), el = $('shelfNav'); if (!el) return
   el.classList.toggle('off', !on); if (!on) return
-  $('shUp').disabled = shelfRow >= NSH - 1 && page <= 0; $('shDn').disabled = shelfRow <= 0 && page >= nCab - 1
+  // disable only when there is no filled shelf / cabinet in that direction (not merely geometric ends)
+  $('shUp').disabled = !canMoveShelf(1); $('shDn').disabled = !canMoveShelf(-1)
 }
 $('shUp').onclick = () => moveShelf(1); $('shDn').onclick = () => moveShelf(-1)
-// drag: horizontal follows the finger 1:1 (in world units at the spine plane); a vertical swipe changes shelf on release
+// drag: first significant axis wins (direction lock). Horizontal pans the shelf; vertical changes row on release
+// (with a live Y preview so the gesture feels alive). Lock threshold is large enough that finger jitter can't
+// steal a vertical swipe as a horizontal pan.
 let sDrag = null
-cv.addEventListener('pointerdown', (e) => { if (mode === 'shelf' && spineClose()) sDrag = { x: e.clientX, y: e.clientY, x0: shelfX, t: performance.now(), lx: e.clientX, lt: performance.now(), v: 0, moved: false } })
+const AXIS_LOCK = 18 // px before axis is chosen
+cv.addEventListener('pointerdown', (e) => {
+  if (mode !== 'shelf' || !spineClose()) return
+  try { cv.setPointerCapture(e.pointerId) } catch (_) {}
+  sDrag = { x: e.clientX, y: e.clientY, x0: shelfX, t: performance.now(), lx: e.clientX, ly: e.clientY, lt: performance.now(), v: 0, vy: 0, moved: false, pid: e.pointerId }
+})
 cv.addEventListener('pointermove', (e) => {
   if (!sDrag || mode !== 'shelf' || !spineClose()) return
-  const dx = e.clientX - sDrag.x, dy = e.clientY - sDrag.y; if (!sDrag.moved && Math.hypot(dx, dy) > 8) sDrag.moved = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v'
+  const dx = e.clientX - sDrag.x, dy = e.clientY - sDrag.y
+  if (!sDrag.moved && Math.hypot(dx, dy) >= AXIS_LOCK) {
+    // require a clear winner (1.15×) so near-diagonal gestures wait; default to vertical when |dy| dominates
+    sDrag.moved = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'h' : Math.abs(dy) > Math.abs(dx) * 1.15 ? 'v' : (Math.abs(dy) >= Math.abs(dx) ? 'v' : 'h')
+  }
+  const now = performance.now(), dt = Math.max(1, now - sDrag.lt)
   if (sDrag.moved === 'h') {
     const upp = (2 * spineHalfW()) / innerWidth, lim = shelfXMax(); let x = sDrag.x0 - dx * upp
-    if (x > lim) x = lim + (x - lim) * 0.25; if (x < -lim) x = -lim + (x + lim) * 0.25 // rubber band at the ends
-    const now = performance.now(); sDrag.v = (e.clientX - sDrag.lx) / Math.max(1, now - sDrag.lt); sDrag.lx = e.clientX; sDrag.lt = now
-    shelfX = x; camGoal = camShelfGoalRaw(); auto = true; dirty = 2
+    if (x > lim) x = lim + (x - lim) * 0.25; if (x < -lim) x = -lim + (x + lim) * 0.25
+    sDrag.v = (e.clientX - sDrag.lx) / dt; sDrag.lx = e.clientX; sDrag.lt = now
+    shelfPreview = 0; shelfX = x; camGoal = camShelfGoalRaw(); auto = true; dirty = 2
+  } else if (sDrag.moved === 'v') {
+    // live preview: drag the framed shelf along Y (rubber-band), commit on release
+    const uppy = (SP * 0.85) / Math.max(160, innerHeight * 0.35)
+    shelfPreview = THREE.MathUtils.clamp(-dy * uppy, -SP * 0.55, SP * 0.55)
+    sDrag.vy = (e.clientY - sDrag.ly) / dt; sDrag.ly = e.clientY; sDrag.lt = now
+    camGoal = camShelfGoalPreview(); auto = true; dirty = 2
   }
 })
 function camShelfGoalRaw() { const keep = shelfX, g = camShelfGoal(); shelfX = keep; const lim = shelfXMax(); if (Math.abs(keep) > lim) { const dx = keep - THREE.MathUtils.clamp(keep, -lim, lim); g.p.x += dx; g.t.x += dx } return g }
+function camShelfGoalPreview() { const g = camShelfGoal(); g.p.y += shelfPreview; g.t.y += shelfPreview; return g }
 const endDrag = (e) => {
   const d = sDrag; sDrag = null; if (!d || mode !== 'shelf' || !spineClose()) return
-  const dx = e.clientX - d.x, dy = e.clientY - d.y, lim = shelfXMax(), upp = (2 * spineHalfW()) / innerWidth
-  if (d.moved === 'v' && Math.abs(dy) > 40) { moveShelf(dy < 0 ? -1 : 1); return } // swipe up → the shelf below comes up
+  try { if (d.pid != null) cv.releasePointerCapture(d.pid) } catch (_) {}
+  const dx = (e.clientX ?? d.lx) - d.x, dy = (e.clientY ?? d.ly) - d.y, lim = shelfXMax(), upp = (2 * spineHalfW()) / innerWidth
+  if (d.moved === 'v') {
+    const commit = Math.abs(dy) > 36 || Math.abs(d.vy) > 0.45
+    // swipe up (dy < 0) → look at the shelf above (content below rises into view); swipe down → shelf below
+    // Natural scroll: finger up → content moves up → higher shelf. Matches ▲ button = moveShelf(+1).
+    shelfPreview = 0
+    if (commit) moveShelf(dy < 0 ? 1 : -1)
+    else { goCam(camShelfGoal()); syncShelfNav() }
+    return
+  }
+  shelfPreview = 0
   if (d.moved === 'h') {
     const over = shelfX - THREE.MathUtils.clamp(shelfX, -lim, lim)
     if (over > spineHalfW() * 0.12 && page < nCab - 1) { goPage(page + 1, true, -1); return }
     if (over < -spineHalfW() * 0.12 && page > 0) { goPage(page - 1, true, 1); return }
-    shelfX = THREE.MathUtils.clamp(shelfX - d.v * upp * 220, -lim, lim) // short fling
+    shelfX = THREE.MathUtils.clamp(shelfX - d.v * upp * 220, -lim, lim)
     goCam(camShelfGoal()); syncShelfNav()
   }
 }
-cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag)
+cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag); cv.addEventListener('lostpointercapture', endDrag)
 let wheelAt = 0
 cv.addEventListener('wheel', (e) => {
   if (mode !== 'shelf' || !spineClose()) return
   e.preventDefault(); const now = performance.now()
-  if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) { const d = e.shiftKey ? e.deltaY : e.deltaX; shelfX = THREE.MathUtils.clamp(shelfX + d * ((2 * spineHalfW()) / innerWidth), -shelfXMax(), shelfXMax()); goCam(camShelfGoal()); return }
-  if (now - wheelAt < 420 || Math.abs(e.deltaY) < 4) return; wheelAt = now; moveShelf(e.deltaY > 0 ? -1 : 1)
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY) * 1.1 || e.shiftKey) {
+    const d = e.shiftKey ? e.deltaY : e.deltaX
+    shelfX = THREE.MathUtils.clamp(shelfX + d * ((2 * spineHalfW()) / innerWidth), -shelfXMax(), shelfXMax()); goCam(camShelfGoal()); syncShelfNav(); return
+  }
+  if (now - wheelAt < 380 || Math.abs(e.deltaY) < 3) return
+  wheelAt = now; moveShelf(e.deltaY > 0 ? -1 : 1) // wheel down → shelf below
 }, { passive: false })
 /** focus the shelf holding `id` (spine mode), centre it laterally and pulse-highlight it */
 function focusItem(id) {
@@ -958,6 +1028,8 @@ const ray = new THREE.Raycaster(), ptr = new THREE.Vector2(); let downAt = null
 cv.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY, performance.now()]; closeMenus(); if (mode === 'inspect') interrupt() })
 cv.addEventListener('pointerup', (e) => {
   if (downAt && mode === 'shelf' && !spineClose()) { const dx = e.clientX - downAt[0], dy = e.clientY - downAt[1]; if (Math.abs(dx) > 90 && Math.abs(dx) > 2 * Math.abs(dy)) { goPage(page + (dx < 0 ? 1 : -1)); return } }
+  // spine drag (axis locked) must not also count as a tap that opens a case
+  if (mode === 'shelf' && spineClose() && Math.hypot(e.clientX - (downAt?.[0] ?? e.clientX), e.clientY - (downAt?.[1] ?? e.clientY)) > AXIS_LOCK) { downAt = null; return }
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 8 || performance.now() - downAt[2] > 600) return
   ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ptr, camera)
   if (mode === 'shelf') { const hit = ray.intersectObjects([...proxies.values()])[0]; if (hit) selectEntry(hit.object.userData.id); return }
@@ -1066,7 +1138,8 @@ function tick() {
     if (camSod.follow(dt, g)) busy = true
   }
   if (dt > 0) { camVel.copy(camera.position).sub(_camPrev).divideScalar(dt); tgtVel.copy(controls.target).sub(_tgtPrev).divideScalar(dt) } _camPrev.copy(camera.position); _tgtPrev.copy(controls.target)
-  controls.enabled = mode === 'shelf'; rot.enabled = mode === 'inspect'
+  // spine owns the pointer (shelf nav / pan); never re-enable OrbitControls there or it steals vertical swipes
+  controls.enabled = mode === 'shelf' && !spineClose(); rot.enabled = mode === 'inspect'
   if (vignette) { const vt = mode === 'inspect' ? 0.52 : 0.32, u = vignette.uniforms.uAmt; if (Math.abs(u.value - vt) > 0.002) { u.value += (vt - u.value) * (1 - Math.exp(-dt * 5)); busy = true } }
   // scripted / auto camera: OrbitControls must not damp or clamp it — but it was also the only thing aiming the camera, so aim it here
   // (without this the view kept the orientation of the last manual frame and every animated pose rendered off-centre)
