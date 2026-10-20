@@ -271,12 +271,27 @@ function nsBack(img, crop, cover, title, color, band, platform) {
   deco(); return c
 }
 function nsLabel(img, crop, cover, title, platform, keyCard) {
-  const c = hcanvas(LBW, LBH), g = c.getContext('2d')
-  g.fillStyle = '#222'; g.fillRect(0, 0, LBW, LBH)
+  const c = hcanvas(LBW, LBH), g = c.getContext('2d'), is2 = platform === 'ns2'
+  // Real Switch labels: red banner (Switch / Switch 2) on top, art, dark footer with product code
+  g.fillStyle = '#1a1a1a'; g.fillRect(0, 0, LBW, LBH)
   if (img) drawCropped(g, img, LBW, LBH, crop)
-  else if (cover) drawCropped(g, cover, LBW, LBH, { s: 1.0, y: 0.1 })
-  if (!img) { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(0, LBH - 70, LBW, 70); g.fillStyle = '#fff'; fitFont(g, title || '', LBW - 40, 26, 800); g.textAlign = 'center'; g.fillText(title || '', LBW / 2, LBH - 28); g.textAlign = 'left' }
-  if (keyCard) keyIcon(g, LBW - 34, 34, 22, '#fff', NS_RED)
+  else if (cover) drawCropped(g, cover, LBW, LBH, { s: 1.0, y: 0.05 })
+  else {
+    const gr = g.createLinearGradient(0, 80, 0, LBH - 60); gr.addColorStop(0, is2 ? '#6a1820' : '#3a3e48'); gr.addColorStop(1, is2 ? '#3a0c12' : '#1e2228')
+    g.fillStyle = gr; g.fillRect(0, 100, LBW, LBH - 158)
+    g.fillStyle = is2 ? 'rgba(255,200,200,.12)' : 'rgba(255,255,255,.14)'; g.fillRect(20, 100, LBW - 40, LBH - 200)
+    g.fillStyle = '#fff'; g.font = '700 36px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(is2 ? 'SWITCH 2' : 'SWITCH', LBW / 2, 200)
+  }
+  // top banner
+  g.fillStyle = NS_RED; g.fillRect(0, 0, LBW, 100)
+  g.fillStyle = '#fff'; g.font = '700 32px Arial'; g.textAlign = 'left'; g.textBaseline = 'middle'
+  g.fillText(is2 ? 'NINTENDO SWITCH  2' : 'NINTENDO SWITCH', 16, 50)
+  if (!img) {
+    g.fillStyle = '#0a0a0a'; g.fillRect(0, LBH - 58, LBW, 58)
+    g.fillStyle = '#ddd'; fitFont(g, title || '', LBW - 36, 22, 700); g.textAlign = 'center'; g.textBaseline = 'middle'
+    g.fillText(title || '', LBW / 2, LBH - 29)
+  }
+  if (keyCard) keyIcon(g, LBW - 34, 36, 22, '#fff', NS_RED)
   return c
 }
 export function genInner(img, crop, cover, color, platform = 'ps5') {

@@ -442,8 +442,10 @@ function tick() {
     // travel pose (identity → tilted) blends into the focus pose (flip + idle spin) by the focus channel: no snap at hand-over
     const k = THREE.MathUtils.smoothstep(e, 0.02, 1)
     if (discFocus && !qs.has('shot') && !rot.dragging) discSpin += dt * 0.35
+    const cart = model.kind === 'cart'
     _qA.setFromEuler(_eA.set((-0.35 - k * 0.2) * k, (0.55 + k * 0.4) * k, 0.15 * k))
-    _qB.setFromEuler(_eA.set(-0.42, flip * Math.PI, 0)).multiply(_qC.setFromAxisAngle(_zAx, discSpin))
+    _qB.setFromEuler(_eA.set(cart ? -0.12 : -0.42, flip * Math.PI + (cart ? Math.sin(discSpin) * 0.25 : 0), 0))
+    if (!cart) _qB.multiply(_qC.setFromAxisAngle(_zAx, discSpin))
     disc.quaternion.slerpQuaternions(_qA, _qB, discAway)
     if (discFocus) { disc.quaternion.premultiply(_rq); disc.position.add(rot.offset(FLOAT, _tmp)) }
   }

@@ -41,19 +41,25 @@ const LITE = mobile
 // Translucent PP (n≈1.49). Desktop: physically based transmission through the real wall thickness (Beer–Lambert
 // attenuation → deep cobalt where the light path is long, readable print/disc through one wall); mobile: alpha blend.
 // The print is OUTSIDE the shell (under the film), so the closed front never looks through the blue plastic.
-const TINT = NSW ? (IS2 ? { col: 0xff8a96, att: 0xb00616, dist: 0.018, alpha: 0xd0101e, op: 0.58 } : { col: 0xf7fafc, att: 0xe8f0f6, dist: 0.6, alpha: 0xf2f5f8, op: 0.2 })
-  : { col: 0xb4c6ff, att: 0x1544d8, dist: 0.032, alpha: 0x0028c4, op: 0.5 }
+// Shell tint matched to real keep-case photos (user RE4 B/C/E; NS clear / NS2 red). Tuned so an EMPTY shell
+// (cover pulled out) still reads as the same saturated translucent PP — never clear glass. Desktop uses
+// transmission + short Beer–Lambert distance; mobile uses a higher alpha so edges stay visible.
+const TINT = NSW
+  ? (IS2
+    ? { col: 0xff6a78, att: 0x8a0814, dist: 0.012, alpha: 0xc0101e, op: 0.78, transm: 0.82 } // Switch 2 translucent red
+    : { col: 0xf2f6f9, att: 0xa8b4bc, dist: 0.09, alpha: 0xe8eef2, op: 0.38, transm: 0.92 }) // Switch 1 grey-clear (visible edges)
+  : { col: 0x7a9aff, att: 0x0a2888, dist: 0.013, alpha: 0x0028b8, op: 0.72, transm: 0.85 } // PS5 deep cobalt
 const shellMat = LITE
-  ? new THREE.MeshPhysicalMaterial({ color: TINT.alpha, roughness: 0.05, metalness: 0, transparent: true, opacity: TINT.op, ior: 1.49,
-      clearcoat: 0.4, clearcoatRoughness: 0.08, specularIntensity: 0.6, side: THREE.FrontSide, depthWrite: false })
-  : new THREE.MeshPhysicalMaterial({ color: TINT.col, roughness: 0.03, metalness: 0, transmission: 1, thickness: T, ior: 1.49,
-      attenuationColor: new THREE.Color(TINT.att), attenuationDistance: TINT.dist, clearcoat: 0.3, clearcoatRoughness: 0.06,
-      specularIntensity: 1, envMapIntensity: 1.1, side: THREE.FrontSide })
-if (NSW && LITE) { shellMat.clearcoat = 0.6; shellMat.specularIntensity = 0.8 }
+  ? new THREE.MeshPhysicalMaterial({ color: TINT.alpha, roughness: 0.06, metalness: 0, transparent: true, opacity: TINT.op, ior: 1.49,
+      clearcoat: 0.45, clearcoatRoughness: 0.1, specularIntensity: 0.7, side: THREE.FrontSide, depthWrite: false })
+  : new THREE.MeshPhysicalMaterial({ color: TINT.col, roughness: 0.04, metalness: 0, transmission: TINT.transm, thickness: T, ior: 1.49,
+      attenuationColor: new THREE.Color(TINT.att), attenuationDistance: TINT.dist, clearcoat: 0.35, clearcoatRoughness: 0.08,
+      specularIntensity: 1, envMapIntensity: 1.05, transparent: true, opacity: 0.97, side: THREE.FrontSide, depthWrite: false })
+if (NSW && LITE) { shellMat.clearcoat = 0.65; shellMat.specularIntensity = 0.85 }
 const trayMat = shellMat.clone()
-trayMat.roughness = 0.025
-if (LITE) trayMat.opacity = NSW ? (IS2 ? 0.5 : 0.18) : 0.42
-else trayMat.thickness = 0.006
+trayMat.roughness = 0.03
+if (LITE) trayMat.opacity = NSW ? (IS2 ? 0.7 : 0.32) : 0.62
+else { trayMat.thickness = 0.007; trayMat.attenuationDistance = TINT.dist * 0.85 }
 // clear PET sleeve: near-zero roughness so the print under it stays sharp (transmission blur scales with roughness)
 const filmMat = new THREE.MeshPhysicalMaterial({
   color: 0xffffff, roughness: 0.012, transmission: 1, thickness: 0.0004, ior: 1.49, metalness: 0, specularIntensity: 1, transparent: true, opacity: 1,
@@ -257,7 +263,7 @@ for (const zc of [CR, D - CR]) {
   ed.position.set(-T / 2, 0, zc)
 }
 // fine crease grooves visible on the outside of the spine
-const grooveMat = new THREE.MeshBasicMaterial({ color: 0x001a66, transparent: true, opacity: 0.35, depthWrite: false })
+const grooveMat = new THREE.MeshBasicMaterial({ color: 0x00145a, transparent: true, opacity: 0.45, depthWrite: false })
 for (const zc of [CR * 0.5, D - CR * 0.5]) { const gl = mesh(new THREE.BoxGeometry(0.0008, H - 0.02, 0.0012), grooveMat, spineG, false); gl.position.set(-T - 0.0004, 0, zc) }
 grooveMat.color.set(NSW ? (IS2 ? 0x600008 : 0x8a95a5) : 0x001a66)
 // mould gate dots on spine interior (two, upper/lower)
@@ -592,32 +598,71 @@ mesh(new THREE.TorusGeometry(0.2, 0.0022, 8, 96), clearMat, disc, false).positio
 mesh(new THREE.TorusGeometry(0.115, 0.0018, 8, 96), clearMat, disc, false).position.z = -0.0006
 shadowDisc = mesh(new THREE.CircleGeometry(R, 64), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }), disc); shadowDisc.position.z = DT / 2
 } else {
-  // ---- Game card 21 × 31 × 3.3 mm. Local +z = label face. Top edge carries the grip lip; rear top = contact window.
-  const { w: cw, h: ch, t: ct } = CART, r = 0.014
-  const bodyMat = new THREE.MeshPhysicalMaterial({ color: IS2 ? 0xa00a16 : 0x151618, roughness: IS2 ? 0.6 : 0.62, specularIntensity: 0.25, clearcoat: 0, envMapIntensity: 0.3 })
-  dataMat.color.set(IS2 ? 0xb00c19 : 0x1c1d20) // API compat
-  const ext = (shape, d) => new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: true, bevelThickness: 0.0012, bevelSize: 0.0012, bevelSegments: 3, curveSegments: 10 })
-  const front = mesh(ext(rrect(cw - 0.0024, ch - 0.0024, r), ct * 0.5 - 0.0024), bodyMat, disc); front.position.z = ct * 0.5 + 0.0012; discPick.push(front)
-  let rear
-  if (IS2) { // NS2: small notch at the bottom right as seen from the rear (= -x in label-up coordinates)
-    const s = new THREE.Shape(), hw = cw / 2 - 0.0012, hh = ch / 2 - 0.0012, nw = 0.028, nh = 0.022
-    s.moveTo(-hw + nw, -hh); s.lineTo(hw - r, -hh); s.quadraticCurveTo(hw, -hh, hw, -hh + r); s.lineTo(hw, hh - r); s.quadraticCurveTo(hw, hh, hw - r, hh)
-    s.lineTo(-hw + r, hh); s.quadraticCurveTo(-hw, hh, -hw, hh - r); s.lineTo(-hw, -hh + nh); s.lineTo(-hw + nw - 0.004, -hh + nh); s.quadraticCurveTo(-hw + nw, -hh + nh, -hw + nw, -hh + nh - 0.004); s.closePath()
-    rear = mesh(ext(s, ct * 0.5 - 0.0024), bodyMat, disc)
-  } else rear = mesh(ext(rrect(cw - 0.0024, ch - 0.0024, r), ct * 0.5 - 0.0024), bodyMat, disc)
-  rear.position.z = 0.0012; discPick.push(rear)
-  // front: shallow label recess + label, ridged grip lip across the top
-  labelRing = mesh(new THREE.PlaneGeometry(CART.labW, CART.labH), labelMat, disc, false); labelRing.position.set(0, -0.022, ct + 0.0004); discPick.push(labelRing)
-  const lip = mesh(new THREE.BoxGeometry(cw - 0.03, 0.016, 0.003), bodyMat, disc, false); lip.position.set(0, ch / 2 - 0.022, ct + 0.0008); lip.rotation.x = -0.35
-  for (let i = 0; i < 3; i++) mesh(new THREE.BoxGeometry(cw - 0.05, 0.0018, 0.0012), bodyMat, disc, false).position.set(0, ch / 2 - 0.012 - i * 0.004, ct + 0.0016)
-  // rear: recessed contact window with 17 gold pads at the top edge
-  const win = mesh(new THREE.PlaneGeometry(cw - 0.03, 0.05), new THREE.MeshStandardMaterial({ color: 0x141414, roughness: 0.7 }), disc, false); win.rotation.y = Math.PI; win.position.set(0, ch / 2 - 0.035, -0.0004)
-  const gold = new THREE.MeshPhysicalMaterial({ color: 0xb8862a, metalness: 1, roughness: 0.38, envMapIntensity: 0.55 })
-  const pads = new THREE.InstancedMesh(new THREE.BoxGeometry(0.0055, 0.03, 0.0008), gold, 17); disc.add(pads)
-  const _m = new THREE.Matrix4(); for (let i = 0; i < 17; i++) { pads.setMatrixAt(i, _m.makeTranslation(-0.072 + i * 0.009, ch / 2 - 0.035, -0.0008)) }
-  // rear embossed logo plate (subtle)
-  const em = mesh(new THREE.PlaneGeometry(0.07, 0.012), new THREE.MeshStandardMaterial({ color: IS2 ? 0x9a0a15 : 0x17181a, roughness: 0.7 }), disc, false); em.rotation.y = Math.PI; em.position.set(0, -0.06, -0.0004)
-  shadowDisc = mesh(new THREE.PlaneGeometry(cw, ch), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }), disc); shadowDisc.position.z = ct / 2
+  // ---- Game card ≈ 21 × 31 × 3.3 mm. Local +z = label (camera-facing), −z = contacts.
+  // +y = logo end, −y = insertion end. NS1 dark grey + side notch; NS2 red + bottom-right notch.
+  const { w: cw, h: ch, t: ct } = CART, r = 0.012
+  const bodyMat = new THREE.MeshPhysicalMaterial({
+    color: IS2 ? 0xb00818 : 0x1a1b1d, roughness: IS2 ? 0.55 : 0.58, metalness: 0,
+    specularIntensity: 0.22, clearcoat: 0.1, clearcoatRoughness: 0.5, envMapIntensity: 0.4,
+  })
+  dataMat.color.set(IS2 ? 0xb00818 : 0x1a1b1d)
+  const ext = (shape, d, bev = 0.0008) => new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: true, bevelThickness: bev, bevelSize: bev, bevelSegments: 2, curveSegments: 12 })
+  const labW = CART.labW, labH = CART.labH, labY = 0.01
+  {
+    const s = new THREE.Shape(), hw = cw / 2, hh = ch / 2
+    if (IS2) {
+      const nw = 0.024, nh = 0.018
+      s.moveTo(-hw + r, -hh); s.lineTo(hw - nw, -hh); s.lineTo(hw - nw, -hh + nh); s.lineTo(hw, -hh + nh)
+      s.lineTo(hw, hh - r); s.quadraticCurveTo(hw, hh, hw - r, hh); s.lineTo(-hw + r, hh); s.quadraticCurveTo(-hw, hh, -hw, hh - r)
+      s.lineTo(-hw, -hh + r); s.quadraticCurveTo(-hw, -hh, -hw + r, -hh)
+    } else {
+      const nw = 0.022, nh = 0.055, y0 = -hh + 0.012
+      s.moveTo(-hw + r, -hh); s.lineTo(hw - r, -hh); s.quadraticCurveTo(hw, -hh, hw, -hh + r)
+      s.lineTo(hw, y0); s.lineTo(hw - nw, y0); s.lineTo(hw - nw, y0 + nh); s.lineTo(hw, y0 + nh)
+      s.lineTo(hw, hh - r); s.quadraticCurveTo(hw, hh, hw - r, hh); s.lineTo(-hw + r, hh); s.quadraticCurveTo(-hw, hh, -hw, hh - r)
+      s.lineTo(-hw, -hh + r); s.quadraticCurveTo(-hw, -hh, -hw + r, -hh)
+    }
+    const body = mesh(ext(s, ct, 0.0007), bodyMat, disc); body.position.z = -ct / 2; discPick.push(body)
+  }
+  // Label on +z (camera-facing), slightly proud
+  labelMat.side = THREE.DoubleSide
+  labelRing = mesh(new THREE.PlaneGeometry(labW, labH), labelMat, disc, false)
+  labelRing.position.set(0, labY, ct / 2 + 0.0012); discPick.push(labelRing)
+  const rimZ = ct / 2 + 0.0005, bw = Math.max(0.004, (cw - labW) / 2), bh = Math.max(0.004, (ch - labH) / 2)
+  for (const [x, y, w, h] of [
+    [0, labY + labH / 2 + bh / 2, cw - 0.004, bh],
+    [0, labY - labH / 2 - bh / 2, cw - 0.004, bh],
+    [-(labW / 2 + bw / 2), labY, bw, labH],
+    [labW / 2 + bw / 2, labY, bw, labH],
+  ]) mesh(new THREE.BoxGeometry(Math.max(0.002, w), Math.max(0.002, h), 0.0014), bodyMat, disc, false).position.set(x, y, rimZ)
+  mesh(new THREE.BoxGeometry(cw * 0.4, 0.009, 0.002), bodyMat, disc, false).position.set(0, ch / 2 - 0.007, ct / 2 + 0.0015)
+  {
+    const ash = new THREE.Shape(); ash.moveTo(0, -0.006); ash.lineTo(0.0055, 0.0045); ash.lineTo(-0.0055, 0.0045); ash.closePath()
+    const arr = mesh(new THREE.ShapeGeometry(ash), new THREE.MeshStandardMaterial({ color: IS2 ? 0x8a0610 : 0x0e0f11, roughness: 0.7 }), disc, false)
+    arr.position.set(0, -ch / 2 + 0.013, ct / 2 + 0.0014)
+  }
+  // Contacts on −z (back)
+  const bayY = -ch / 2 + 0.048, bayH = 0.078, bayW = cw - 0.028
+  const pcb = mesh(new THREE.PlaneGeometry(bayW, bayH), new THREE.MeshStandardMaterial({ color: 0x1a5a28, roughness: 0.55, metalness: 0.1, side: THREE.DoubleSide }), disc, false)
+  pcb.rotation.y = Math.PI; pcb.position.set(0, bayY, -ct / 2 - 0.0005)
+  const gold = new THREE.MeshPhysicalMaterial({ color: 0xc9a227, metalness: 1, roughness: 0.28, envMapIntensity: 0.7 })
+  const Npads = 11, padW = 0.008, padGap = 0.0032, padSpan = Npads * padW + (Npads - 1) * padGap
+  const pads = new THREE.InstancedMesh(new THREE.BoxGeometry(padW, 0.055, 0.0007), gold, Npads); disc.add(pads)
+  const _m = new THREE.Matrix4()
+  for (let i = 0; i < Npads; i++) pads.setMatrixAt(i, _m.makeTranslation(-padSpan / 2 + padW / 2 + i * (padW + padGap), bayY - 0.006, -ct / 2 - 0.001))
+  for (let i = 0; i < 5; i++) {
+    const fin = mesh(new THREE.BoxGeometry(0.0022, bayH * 0.92, 0.0045), bodyMat, disc, false)
+    fin.position.set(-bayW / 2 + 0.006 + i * ((bayW - 0.012) / 4), bayY, -ct / 2 - 0.0022)
+  }
+  {
+    const oval = mesh(new THREE.PlaneGeometry(0.09, 0.028), new THREE.MeshStandardMaterial({ color: IS2 ? 0x8a0610 : 0x121314, roughness: 0.65, side: THREE.DoubleSide }), disc, false)
+    oval.rotation.y = Math.PI; oval.position.set(0, ch / 2 - 0.04, -ct / 2 - 0.0005)
+    const code = mesh(new THREE.PlaneGeometry(0.1, 0.014), new THREE.MeshStandardMaterial({ color: IS2 ? 0x7a050e : 0x101112, roughness: 0.7, side: THREE.DoubleSide }), disc, false)
+    code.rotation.y = Math.PI; code.position.set(0, ch / 2 - 0.07, -ct / 2 - 0.0005)
+  }
+  shadowDisc = mesh(new THREE.PlaneGeometry(cw, ch), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }), disc)
+  shadowDisc.position.z = 0
+
 }
 
 // Seat position: on hub, just above tray (in root/base local → world via root)

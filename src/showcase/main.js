@@ -368,10 +368,10 @@ let doorOpen = 0, doorTarget = 0
 function cabinetCenter() { return new THREE.Vector3(page * CAB_PITCH, PLINTH + (NSH * SP) / 2, 0) }
 
 // ---------------- proxies on the shelf ----------------
-const tintMat = new THREE.MeshPhysicalMaterial({ color: 0x1846d0, roughness: 0.18, transparent: true, opacity: 0.88, clearcoat: 0.8, clearcoatRoughness: 0.1 })
+const tintMat = new THREE.MeshPhysicalMaterial({ color: 0x0a2888, roughness: 0.16, transparent: true, opacity: 0.92, clearcoat: 0.75, clearcoatRoughness: 0.12 })
 const tintMats = { ps5: tintMat,
-  ns: new THREE.MeshPhysicalMaterial({ color: 0xeef3f6, roughness: 0.12, transparent: true, opacity: 0.55, clearcoat: 0.9, clearcoatRoughness: 0.08 }),
-  ns2: new THREE.MeshPhysicalMaterial({ color: 0xc8101e, roughness: 0.16, transparent: true, opacity: 0.88, clearcoat: 0.8, clearcoatRoughness: 0.1 }) }
+  ns: new THREE.MeshPhysicalMaterial({ color: 0xe8eef2, roughness: 0.14, transparent: true, opacity: 0.7, clearcoat: 0.85, clearcoatRoughness: 0.1 }),
+  ns2: new THREE.MeshPhysicalMaterial({ color: 0xb00818, roughness: 0.2, transparent: true, opacity: 0.9, clearcoat: 0.7, clearcoatRoughness: 0.14 }) }
 const proxyGeos = {}
 const specOf = (e) => platformSpec(e?.platform)
 // 4 draw groups instead of 6: [tint (+x,+y,−y), spine (−x), front (+z), back (−z)]
@@ -1047,7 +1047,7 @@ function tick() {
     else {
       // one continuous cubic Bézier: straight up / out of the tray, then on to the presentation point (was two eased legs with a stop between)
       _lift.copy(_seat).add(_v.set(0.04, 0.11, 0.4)); _b2.copy(F).add(_v.set(0.03, 0.04, -0.3)); cubic(_seat, _lift, _b2, F, e, model.disc.position)
-      R.getWorldQuaternion(_qs); _qp.setFromEuler(_eu.set(isCart ? -0.18 : -0.3, flip * Math.PI + (isCart ? Math.sin(spin) * 0.3 : 0), 0)); if (!isCart) _qp.multiply(_q2.setFromAxisAngle(_Z, spin))
+      R.getWorldQuaternion(_qs); _qp.setFromEuler(_eu.set(isCart ? -0.12 : -0.3, flip * Math.PI + (isCart ? Math.sin(spin) * 0.25 : 0), 0)); if (!isCart) _qp.multiply(_q2.setFromAxisAngle(_Z, spin))
       model.disc.quaternion.slerpQuaternions(_qs, _qp, THREE.MathUtils.smoothstep(e, 0.04, 0.8))
       const cD = carry.cDisc; if (cD.w > 0) { model.disc.quaternion.premultiply(carrySlerp(cD, _cq3)); model.disc.position.addScaledVector(cD.off, cD.w) }
       if (act === 'disc') { model.disc.quaternion.premultiply(_rq); model.disc.position.add(rot.offset(F, _v)) }
@@ -1607,6 +1607,8 @@ async function boot() {
     const vo = camera.view && camera.view.enabled ? [camera.view.offsetX, camera.view.offsetY] : null, r = renderer.domElement.getBoundingClientRect()
     return { mode, what, vis: mode === 'inspect' ? visibleNdc().map((v) => +v.toFixed(3)) : null, cam3: camera.position.distanceTo(controls.target).toFixed(2), cab: pr(cab), foc: pr(f), focPivot: fc && [+fc.x.toFixed(4), +fc.y.toFixed(4)], vo, canvas: [r.left, r.width, innerWidth, renderer.domElement.width], par: par.toArray(), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
   }
+  window.__sc.cart = () => { const d = model.disc; let n = 0, labs = []; d.traverse(o => { n++; if (o.isMesh && o.material === model.labelMat) labs.push({ map: !!o.material.map, pos: o.position.toArray().map(v=>+v.toFixed(4)), vis: o.visible, parent: o.parent?.type }) }); return { kids: n, labs, scale: d.scale.x, quat: d.quaternion.toArray().map(v=>+v.toFixed(3)), pos: d.position.toArray().map(v=>+v.toFixed(3)), kind: model.kind } }
+  window.__sc.shell = () => { const m = model.shellMat; return { color: '#'+m.color.getHexString(), att: m.attenuationColor ? '#'+m.attenuationColor.getHexString() : null, dist: m.attenuationDistance, transmission: m.transmission, opacity: m.opacity, thickness: m.thickness, transparent: m.transparent, LITE: !!mobile, plat: model.kind, sheetK } }
   window.__sc.spine = (cmd) => { if (cmd === 'up') moveShelf(1); if (cmd === 'down') moveShelf(-1); if (cmd === 'right') panShelf(0.6); if (cmd === 'left') panShelf(-0.6); if (cmd && cmd.focus != null) focusItem(entries[cmd.focus].id)
     const zF = 0.55, dz = camera.position.z - zF, tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); let hi = 0, tot = 0, texH = 0
     for (const [, m] of proxies) { const L = m.userData.home; if (L && L.cab === page && L.shelf === shelfRow && m.visible) { tot++; if (m.userData.hiSpine) hi++; const mp = Array.isArray(m.material) && m.material[1]?.map; if (mp?.image) texH = Math.max(texH, mp.image.height || 0) } }
