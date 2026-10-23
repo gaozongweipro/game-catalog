@@ -10,7 +10,7 @@ import { loadRE4 } from '../demo/art.js'
 import { db, uid, exportCollection, importCollection } from './db.js'
 import { searchCatalog, searchWiki, fetchImageBlob, loadCatalog, norm } from './lookup.js'
 import { resample, bitmapSize, prepareRetail } from './gen.js'
-import { TEMPLATES, templatesFor, NS_BAND, NS2_BAND, NS2_FRAME, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt, buildShelfArt, withPrintScale } from './gen.js'
+import { TEMPLATES, templatesFor, NS_BAND, NS2_BAND, NS2_FRAME, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt } from './gen.js'
 import { BANNER } from '../demo/caseModel.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
@@ -372,7 +372,7 @@ function buildFixtures() {
     const stem = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.25, 0.03), railMat); stem.position.set(p.x, TRACK_Y + 0.13, p.z); fixtures.add(stem)
   }
 }
-function placeLights() { ensureCabs(); lightRig.position.x = page * CAB_PITCH; key.position.x = 4 + page * CAB_PITCH; key.target.position.x = page * CAB_PITCH; key.target.updateMatrixWorld() }
+function placeLights() { ensureCabs(); lightRig.position.x = page * CAB_PITCH; key.position.x = 4 + page * CAB_PITCH; key.target.position.x = page * CAB_PITCH; key.target.updateMatrixWorld(); if (typeof bgEpoch !== 'undefined') bgEpoch++; renderer.shadowMap.needsUpdate = true }
 let doorOpen = 0, doorTarget = 0
 function cabinetCenter() { return new THREE.Vector3(page * CAB_PITCH, PLINTH + (NSH * SP) / 2, 0) }
 
@@ -410,23 +410,6 @@ async function getArt(e) {
   if (e.sample) art = await (re4Promise ||= loadRE4(BASE))
   else { const imgs = {}; for (const k of Object.keys(TEMPLATES)) imgs[k] = await blobToImage(e.slots?.[k]?.blob); art = buildArt(e, imgs) }
   artCache.set(e.id, art); return art
-}
-// Shelf proxies only show front / spine / back at ≤ TEXMAX px. Decode the uploads scaled (createImageBitmap decodes off the
-// main thread) and draw just those three faces at texture scale — was a full-size <img> decode + all six 2× print surfaces
-// (~1–1.5 s of main-thread work per case). Inspect / hi-res spines still use the full print art (getArt).
-async function decodeScaled(blob, tw, th, cs = 1) {
-  if (!blob) return null
-  try {
-    const b = await createImageBitmap(blob), need = Math.max(tw / b.width, th / b.height) * Math.max(1, cs) * 1.1
-    if (need >= 0.9) return b
-    const r = await createImageBitmap(b, { resizeWidth: Math.max(1, Math.round(b.width * need)), resizeHeight: Math.max(1, Math.round(b.height * need)), resizeQuality: 'high' }); b.close(); return r
-  } catch { return blobToImage(blob) }
-}
-async function getShelfArt(e) {
-  if (e.sample || artCache.has(e.id)) return getArt(e)
-  const T = templatesFor(e.platform), S = Math.min(2, (TEXMAX * 1.05) / T.front.h), imgs = {}
-  for (const k of ['front', 'spine', 'back']) { const sl = e.slots?.[k]; imgs[k] = await decodeScaled(sl?.blob, T[k].w * S, T[k].h * S, sl?.crop?.s) }
-  try { return withPrintScale(S, () => buildShelfArt(e, imgs)) } finally { for (const v of Object.values(imgs)) v?.close?.() }
 }
 // ---------- view list: search / platform filter / sort ----------
 let fQuery = '', fPlat = 'all', fSort = localStorage.getItem('showcase-sort') || 'custom', view = []
@@ -488,7 +471,7 @@ async function streamTick() { // one proxy texture per frame-ish; keeps 200+ ite
   if (streaming || !streamQ.length) return; streaming = true
   const id = streamQ.shift(), e = entries.find((x) => x.id === id), m = proxies.get(id)
   if (e && m && isPh(m) && Math.abs((m.userData.cab ?? 0) - page) <= 1) {
-    const art = await getShelfArt(e); if (proxies.get(id) === m && isPh(m)) { bgEpoch++; m.material = proxyMats(art, e.platform || 'ps5'); m.userData.hiSpine = false; dirty = 2; if (spineClose() && m.userData.home?.cab === page && m.userData.home?.shelf === shelfRow && !hiQ.includes(id)) hiQ.push(id) }
+    const art = await getArt(e); if (proxies.get(id) === m && isPh(m)) { bgEpoch++; m.material = proxyMats(art, e.platform || 'ps5'); m.userData.hiSpine = false; dirty = 2; if (spineClose() && m.userData.home?.cab === page && m.userData.home?.shelf === shelfRow && !hiQ.includes(id)) hiQ.push(id) }
     if (!(sel && sel.id === id) && !(editing && editing.id === id)) artCache.delete(id) // keep only GPU textures; regenerate on inspect
   }
   streaming = false
@@ -1164,6 +1147,9 @@ function tick() {
   const scriptedCam = camScripted || (auto && camGoal)
   if (scriptedCam) camera.lookAt(controls.target)
   const changed = scriptedCam ? false : controls.update()
+  // any shadow caster that moved (incl. movers not tracked above) or the light rig → shadows must follow this frame
+  let sig = lightRig.position.x; for (const m of proxies.values()) if (m.visible) { const P = m.position, Q = m.quaternion; sig += P.x * 1.3 + P.y * 2.7 + P.z * 3.1 + Q.x * 5.3 + Q.y * 7.1 + Q.z * 11.3 + Q.w * 13.7 + m.scale.x * 17.9 }
+  if (sig !== casterSig) { casterSig = sig; objBusy = true }
   interactionLOD(mode === 'inspect' && (rot.active || busy), dt, objBusy || mode !== 'shelf')
   if (window.__rec) window.__rec.push(window.__sc.probe())
   if (busy || changed || dirty > 0) { const t0 = performance.now(); draw(); perfSample(performance.now() - t0, dt); dirty = Math.max(0, dirty - 1) }
@@ -1183,14 +1169,7 @@ const gpuName = (() => { try { const gl = renderer.getContext(), e = gl.getExten
 const weakGPU = /SwiftShader|llvmpipe|Mali-[GT][0-7]\d|Adreno \(TM\) [3-5]\d\d|PowerVR|Intel\(R\) (HD|UHD) Graphics [1-6]/i.test(gpuName)
 let tier = qs.get('tier') || (qs.has('shot') ? 'high' : mobile ? (weakGPU ? 'low' : 'mid') : weakGPU ? 'mid' : 'high')
 let composer = null, gtao = null, bloom = null, vignette = null, smaa = null, pinned = qs.has('tier') || qs.has('shot')
-// Pixel budget: full-res post (MSAA ×4 HDR + transmission + bloom + SMAA) on a 2× desktop panel at 1920×1080 CSS px is
-// 8.3 MP per pass. Cap the backing store to ~4.2 MP (2560×1600) for high, 3 MP for mid — a laptop retina (1440×900 @2)
-// still renders at 1.8×; only very large hi-dpi windows are scaled. prStep lowers it further when frames stay slow.
-let prStep = 1
-function tierPR() {
-  const cap = tier === 'high' ? 2 : tier === 'mid' ? 1.5 : 1, budget = tier === 'high' ? 4.2e6 : 3e6
-  return Math.max(1, Math.min(devicePixelRatio, cap, Math.sqrt(budget / Math.max(1, innerWidth * innerHeight))) * prStep)
-}
+function tierPR() { return Math.min(devicePixelRatio, tier === 'high' ? 2 : tier === 'mid' ? 1.5 : 1) }
 function setupTier() {
   composer?.dispose(); composer = null; gtao?.dispose?.(); gtao = null
   renderer.setPixelRatio(tierPR()); smaa = null
@@ -1220,7 +1199,7 @@ function draw() {
 // is in the transmission pass) and post (bloom / vignette / SMAA) runs on the same input — only the item's meshes are drawn.
 // Any camera move, resize, environment / streaming / door / highlight change drops the cache.
 let bgEpoch = 0
-const bgF = { rt: null, ok: false, epoch: -1, env: null, w: 0, h: 0, cam: new THREE.Matrix4(), proj: new THREE.Matrix4(), prev: new THREE.Matrix4(), still: 0 }
+const bgF = { rt: null, ok: false, epoch: -1, env: null, w: 0, h: 0, cam: new THREE.Matrix4(), proj: new THREE.Matrix4(), prev: new THREE.Matrix4(), pprev: new THREE.Matrix4(), still: 0 }
 const bgQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
   uniforms: { tC: { value: null }, tD: { value: null } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
@@ -1233,8 +1212,8 @@ const matNear = (a, b, eps = 5e-5) => { for (let i = 0; i < 16; i++) if (Math.ab
 const isFg = (o) => o === holder || o === bgQuad || Object.values(models).some((m) => m.disc === o)
 function freezeWanted() {
   camera.updateMatrixWorld()
-  const still = matNear(bgF.prev, camera.matrixWorld); bgF.prev.copy(camera.matrixWorld); bgF.still = still ? bgF.still + 1 : 0
-  return mode === 'inspect' && !window.__noFreeze && lodOn && !(gtao && gtao.enabled) && bgF.still >= 1 && !owns('door') && hl.size === 0
+  const still = matNear(bgF.prev, camera.matrixWorld) && matNear(bgF.pprev, camera.projectionMatrix, 1e-6); bgF.prev.copy(camera.matrixWorld); bgF.pprev.copy(camera.projectionMatrix); bgF.still = still ? bgF.still + 1 : 0
+  return mode === 'inspect' && !window.__noFreeze && lodOn && !(gtao && gtao.enabled) && bgF.still >= 2 && !owns('door') && hl.size === 0
 }
 const _bgHide = []
 function frozenDraw() {
@@ -1319,7 +1298,7 @@ function toneApply(regs, px) {
 // animation (cover out / back, disc, return) never ends in a visible pop.
 let lodOn = false, lodIdle = 0, lodSlow = 0, lodDpr = false, aoW = 1, aoP = 1, lodF = 0
 const GTAO_BLEND = 0.6
-let shadowIdle = false
+let shadowIdle = false, casterSig = NaN
 function interactionLOD(active, dt, objMoving = true) {
   if (active) { lodIdle = 0; lodOn = true } else if (lodOn && (lodIdle += dt) > 0.25) lodOn = false
   if (gtao) {
@@ -1331,7 +1310,7 @@ function interactionLOD(active, dt, objMoving = true) {
   if (!objMoving) { if (!shadowIdle) { shadowIdle = true; renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true } }
   else if (lodOn) { shadowIdle = false; renderer.shadowMap.autoUpdate = false; if ((++lodF & 1) === 0) renderer.shadowMap.needsUpdate = true }
   else if (shadowIdle || !renderer.shadowMap.autoUpdate) { shadowIdle = false; renderer.shadowMap.autoUpdate = true; renderer.shadowMap.needsUpdate = true }
-  if (rot.dragging && dt > 0.024) { if (++lodSlow > 20 && !lodDpr && composer && renderer.getPixelRatio() > 1) { lodDpr = true; composer.setPixelRatio(1) } }
+  if (mobile && rot.dragging && dt > 0.024) { if (++lodSlow > 20 && !lodDpr && composer && renderer.getPixelRatio() > 1) { lodDpr = true; composer.setPixelRatio(1) } }
   else { lodSlow = Math.max(0, lodSlow - 1); if (lodDpr && !rot.dragging) { lodDpr = false; composer?.setPixelRatio(renderer.getPixelRatio()); dirty = Math.max(dirty, 1) } }
 }
 // auto-downgrade: if active frames stay slow, drop one tier (never upgrades back automatically)
@@ -1340,7 +1319,6 @@ function perfSample(ms, dt) {
   if (pinned || document.hidden) return
   perf.push(Math.max(ms, Math.min(dt * 1000, 200))); if (perf.length < 45) return
   const m = perf.sort((a, b) => a - b)[22]; perf.length = 0
-  if (m > 40 && renderer.getPixelRatio() > 1.05 && prStep > 0.6) { prStep = Math.max(0.6, prStep - 0.2); sizeComposer(); dirty = 3; return } // resolution first (invisible-ish), effects last
   if (m > 40 && tier !== 'low') { tier = TIERS[TIERS.indexOf(tier) - 1]; setupTier() }
 }
 setupTier()
