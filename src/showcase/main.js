@@ -10,7 +10,7 @@ import { loadRE4 } from '../demo/art.js'
 import { db, uid, exportCollection, importCollection } from './db.js'
 import { searchCatalog, searchWiki, fetchImageBlob, loadCatalog, norm } from './lookup.js'
 import { resample, bitmapSize, prepareRetail } from './gen.js'
-import { TEMPLATES, templatesFor, NS_BAND, NS2_BAND, NS2_FRAME, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt } from './gen.js'
+import { TEMPLATES, templatesFor, NS_BAND, NS2_BAND, NS2_FRAME, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt, buildShelfArt, withPrintScale } from './gen.js'
 import { BANNER } from '../demo/caseModel.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
@@ -411,6 +411,23 @@ async function getArt(e) {
   else { const imgs = {}; for (const k of Object.keys(TEMPLATES)) imgs[k] = await blobToImage(e.slots?.[k]?.blob); art = buildArt(e, imgs) }
   artCache.set(e.id, art); return art
 }
+// Shelf proxies only show front / spine / back at ≤ TEXMAX px. Decode the uploads scaled (createImageBitmap decodes off the
+// main thread) and draw just those three faces at texture scale — was a full-size <img> decode + all six 2× print surfaces
+// (~1–1.5 s of main-thread work per case). Inspect / hi-res spines still use the full print art (getArt).
+async function decodeScaled(blob, tw, th, cs = 1) {
+  if (!blob) return null
+  try {
+    const b = await createImageBitmap(blob), need = Math.max(tw / b.width, th / b.height) * Math.max(1, cs) * 1.1
+    if (need >= 0.9) return b
+    const r = await createImageBitmap(b, { resizeWidth: Math.max(1, Math.round(b.width * need)), resizeHeight: Math.max(1, Math.round(b.height * need)), resizeQuality: 'high' }); b.close(); return r
+  } catch { return blobToImage(blob) }
+}
+async function getShelfArt(e) {
+  if (e.sample || artCache.has(e.id)) return getArt(e)
+  const T = templatesFor(e.platform), S = Math.min(2, (TEXMAX * 1.05) / T.front.h), imgs = {}
+  for (const k of ['front', 'spine', 'back']) { const sl = e.slots?.[k]; imgs[k] = await decodeScaled(sl?.blob, T[k].w * S, T[k].h * S, sl?.crop?.s) }
+  try { return withPrintScale(S, () => buildShelfArt(e, imgs)) } finally { for (const v of Object.values(imgs)) v?.close?.() }
+}
 // ---------- view list: search / platform filter / sort ----------
 let fQuery = '', fPlat = 'all', fSort = localStorage.getItem('showcase-sort') || 'custom', view = []
 function computeView() {
@@ -471,13 +488,13 @@ async function streamTick() { // one proxy texture per frame-ish; keeps 200+ ite
   if (streaming || !streamQ.length) return; streaming = true
   const id = streamQ.shift(), e = entries.find((x) => x.id === id), m = proxies.get(id)
   if (e && m && isPh(m) && Math.abs((m.userData.cab ?? 0) - page) <= 1) {
-    const art = await getArt(e); if (proxies.get(id) === m && isPh(m)) { m.material = proxyMats(art, e.platform || 'ps5'); m.userData.hiSpine = false; dirty = 2; if (spineClose() && m.userData.home?.cab === page && m.userData.home?.shelf === shelfRow && !hiQ.includes(id)) hiQ.push(id) }
+    const art = await getShelfArt(e); if (proxies.get(id) === m && isPh(m)) { bgEpoch++; m.material = proxyMats(art, e.platform || 'ps5'); m.userData.hiSpine = false; dirty = 2; if (spineClose() && m.userData.home?.cab === page && m.userData.home?.shelf === shelfRow && !hiQ.includes(id)) hiQ.push(id) }
     if (!(sel && sel.id === id) && !(editing && editing.id === id)) artCache.delete(id) // keep only GPU textures; regenerate on inspect
   }
   streaming = false
 }
 function updateStreaming() {
-  streamQ = []
+  streamQ = []; bgEpoch++; renderer.shadowMap.needsUpdate = true
   for (const [id, m] of proxies) {
     const d = Math.abs((m.userData.cab ?? 0) - page), shown = LAY.has(id)
     m.visible = shown && d <= 1 && !(sel && sel.id === id && (mode === 'inspect' || mode === 'editor'))
@@ -499,7 +516,7 @@ async function syncShelf(animate = true) {
     if (!animate || m.userData.fresh || Math.abs(L.cab - page) > 1) { m.position.copy(L.p); m.rotation.copy(L.r); if (m.userData.fresh && animate && Math.abs(L.cab - page) <= 1) { m.scale.setScalar(0.001); m.userData.pop = 0 } m.userData.fresh = false }
     else m.userData.glide = { from: m.position.clone(), q0: m.quaternion.clone(), t: 0 }
   }
-  updateStreaming(); syncPager(); syncShelfNav()
+  updateStreaming(); syncPager(); syncShelfNav(); bgEpoch++
   $('empty').classList.toggle('hidden', entries.length > 0 || mode !== 'shelf')
   dirty = 3
 }
@@ -709,7 +726,7 @@ function finishReturn() {
 const DOCK_OFF = new THREE.Vector3(-1.55, 0.62, -0.7), _dockP = new THREE.Vector3(), _cp = new THREE.Vector3(), _F = new THREE.Vector3()
 function inspCam(out) { const d = mobile && innerWidth < innerHeight ? 5.2 : 4.0; return out.copy(INS).add(_v2.set(0.75, 0.42, d)) }
 const _v2 = new THREE.Vector3()
-function setMode(m) { mode = m; applyLimits(); syncShelfNav(); if (typeof updateStreaming === 'function' && entries.length) updateStreaming(); document.body.className = 'mode-' + m; $('inspect').classList.toggle('hidden', !(m === 'inspect')); $('empty').classList.toggle('hidden', entries.length > 0 || m !== 'shelf'); syncInspectUI(); dirty = 3 }
+function setMode(m) { mode = m; renderer.shadowMap.needsUpdate = true; applyLimits(); syncShelfNav(); if (typeof updateStreaming === 'function' && entries.length) updateStreaming(); document.body.className = 'mode-' + m; $('inspect').classList.toggle('hidden', !(m === 'inspect')); $('empty').classList.toggle('hidden', entries.length > 0 || m !== 'shelf'); syncInspectUI(); dirty = 3 }
 // ---- spine mode: the camera frames ONE shelf, close enough that spine titles are legible (≈SPINE_TXT_PX CSS px glyphs),
 // and moves shelf to shelf (vertical swipe / wheel / ▲▼ / arrow keys) and along it (horizontal drag), across cabinets at
 // the ends. Front mode keeps the whole-cabinet framing. All moves are goals for the same critically damped camera follow.
@@ -1019,7 +1036,7 @@ async function hiTick() {
   if (hiBusy || !hiQ.length || streaming) return; const id = hiQ[0], m = proxies.get(id), e = entries.find((x) => x.id === id)
   if (!m || !e || isPh(m)) { if (!m || !e) hiQ.shift(); return } // placeholder still streaming: wait for it
   hiQ.shift(); hiBusy = true
-  try { const art = await getArt(e); if (proxies.get(id) === m && !isPh(m) && Array.isArray(m.material)) { const mat = m.material[1], old = mat.map; mat.map = shrink(art.spine, SPINE_HI); mat.needsUpdate = true; old?.dispose(); m.userData.hiSpine = true; dirty = 2 }
+  try { const art = await getArt(e); if (proxies.get(id) === m && !isPh(m) && Array.isArray(m.material)) { const mat = m.material[1], old = mat.map; mat.map = shrink(art.spine, SPINE_HI); mat.needsUpdate = true; bgEpoch++; old?.dispose(); m.userData.hiSpine = true; dirty = 2 }
     if (!(sel && sel.id === id) && !(editing && editing.id === id)) artCache.delete(id) } finally { hiBusy = false }
 }
 
@@ -1056,13 +1073,14 @@ let simT = 0, forceDt = 0
 function tick() {
   const dt = forceDt || Math.min(clock.getDelta(), 0.05); simT += dt; let busy = drive(dt)
   // doors
-  if (owns('door')) busy = true
+  let objBusy = false
+  if (owns('door')) { busy = true; objBusy = true; bgEpoch++ }
   doors.forEach((p) => (p.rotation.y = p.userData.ci === page ? p.userData.sx * doorOpen * THREE.MathUtils.degToRad(105) : 0))
   streamTick(); hiTick(); if (tickHighlight(dt)) busy = true
   // shelf glides / pops
   for (const m of proxies.values()) {
-    if (m.userData.glide) { const g = m.userData.glide; g.t = Math.min(1, g.t + dt / 0.6); const k = ease(g.t); m.position.lerpVectors(g.from, m.userData.home.p, k); _q.setFromEuler(m.userData.home.r); m.quaternion.slerpQuaternions(g.q0, _q, k); if (g.t >= 1) delete m.userData.glide; busy = true }
-    if (m.userData.pop != null) { m.userData.pop = Math.min(1, m.userData.pop + dt / 0.55); const k = m.userData.pop; m.scale.setScalar(Math.max(0.001, 1 + Math.sin(k * Math.PI) * 0.06 - (1 - ease(k)) * 1)); if (k >= 1) { m.scale.setScalar(1); delete m.userData.pop } busy = true }
+    if (m.userData.glide) { const g = m.userData.glide; g.t = Math.min(1, g.t + dt / 0.6); const k = ease(g.t); m.position.lerpVectors(g.from, m.userData.home.p, k); _q.setFromEuler(m.userData.home.r); m.quaternion.slerpQuaternions(g.q0, _q, k); if (g.t >= 1) delete m.userData.glide; busy = true; objBusy = true }
+    if (m.userData.pop != null) { m.userData.pop = Math.min(1, m.userData.pop + dt / 0.55); const k = m.userData.pop; m.scale.setScalar(Math.max(0.001, 1 + Math.sin(k * Math.PI) * 0.06 - (1 - ease(k)) * 1)); if (k >= 1) { m.scale.setScalar(1); delete m.userData.pop } busy = true; objBusy = true }
   }
   // fly out / back
   if (mode === 'back' && flight && sel) { // second half of the return: the shelf proxy continues on the same arc
@@ -1146,7 +1164,7 @@ function tick() {
   const scriptedCam = camScripted || (auto && camGoal)
   if (scriptedCam) camera.lookAt(controls.target)
   const changed = scriptedCam ? false : controls.update()
-  interactionLOD(mode === 'inspect' && (rot.active || busy), dt)
+  interactionLOD(mode === 'inspect' && (rot.active || busy), dt, objBusy || mode !== 'shelf')
   if (window.__rec) window.__rec.push(window.__sc.probe())
   if (busy || changed || dirty > 0) { const t0 = performance.now(); draw(); perfSample(performance.now() - t0, dt); dirty = Math.max(0, dirty - 1) }
 }
@@ -1164,10 +1182,18 @@ const TIERS = ['low', 'mid', 'high']
 const gpuName = (() => { try { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); return e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : '' } catch { return '' } })()
 const weakGPU = /SwiftShader|llvmpipe|Mali-[GT][0-7]\d|Adreno \(TM\) [3-5]\d\d|PowerVR|Intel\(R\) (HD|UHD) Graphics [1-6]/i.test(gpuName)
 let tier = qs.get('tier') || (qs.has('shot') ? 'high' : mobile ? (weakGPU ? 'low' : 'mid') : weakGPU ? 'mid' : 'high')
-let composer = null, gtao = null, bloom = null, vignette = null, pinned = qs.has('tier') || qs.has('shot')
+let composer = null, gtao = null, bloom = null, vignette = null, smaa = null, pinned = qs.has('tier') || qs.has('shot')
+// Pixel budget: full-res post (MSAA ×4 HDR + transmission + bloom + SMAA) on a 2× desktop panel at 1920×1080 CSS px is
+// 8.3 MP per pass. Cap the backing store to ~4.2 MP (2560×1600) for high, 3 MP for mid — a laptop retina (1440×900 @2)
+// still renders at 1.8×; only very large hi-dpi windows are scaled. prStep lowers it further when frames stay slow.
+let prStep = 1
+function tierPR() {
+  const cap = tier === 'high' ? 2 : tier === 'mid' ? 1.5 : 1, budget = tier === 'high' ? 4.2e6 : 3e6
+  return Math.max(1, Math.min(devicePixelRatio, cap, Math.sqrt(budget / Math.max(1, innerWidth * innerHeight))) * prStep)
+}
 function setupTier() {
   composer?.dispose(); composer = null; gtao?.dispose?.(); gtao = null
-  renderer.setPixelRatio(Math.min(devicePixelRatio, tier === 'high' ? 2 : tier === 'mid' ? 1.5 : 1))
+  renderer.setPixelRatio(tierPR()); smaa = null
   spots[0].castShadow = tier !== 'low'; renderer.shadowMap.needsUpdate = true
   if (tier !== 'low') {
     // EffectComposer bypasses the canvas MSAA → render into a 4× multisampled HDR target (WebGL2) instead
@@ -1176,12 +1202,59 @@ function setupTier() {
     if (tier === 'high') { gtao = new GTAOPass(scene, camera, innerWidth, innerHeight); const ov = gtao._overrideVisibility.bind(gtao); gtao._overrideVisibility = function () { ov(); const c = this._visibilityCache; this.scene.traverse((o) => { if (o.isMesh && o.visible && o.material?.userData?.noAO) { o.visible = false; c.push(o) } }) }; gtao.blendIntensity = GTAO_BLEND * aoW; gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1, scale: 1 }); composer.addPass(gtao) }
     bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.32, 0.55, 1.6); composer.addPass(bloom)
     vignette = new ShaderPass(VignetteShader); composer.addPass(vignette); composer.addPass(new OutputPass())
-    if (tier === 'high') composer.addPass(new SMAAPass()) // after tone mapping: cleans AO / specular edges MSAA can't see
+    if (tier === 'high') composer.addPass((smaa = new SMAAPass())) // after tone mapping: cleans AO / specular edges MSAA can't see
   }
   sizeComposer(); dirty = 3
 }
-function sizeComposer() { renderer.setSize(innerWidth, innerHeight, false); if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(innerWidth, innerHeight) } }
-function draw() { if (composer) composer.render(); else renderer.render(scene, camera); sampleTone() }
+function sizeComposer() { bgEpoch++; if (Math.abs(renderer.getPixelRatio() - tierPR()) > 0.01) renderer.setPixelRatio(tierPR()); renderer.setSize(innerWidth, innerHeight, false); if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(innerWidth, innerHeight) } }
+function draw() {
+  if (composer && freezeWanted()) frozenDraw()
+  else { if (bgF.ok) { bgF.ok = false; renderer.shadowMap.needsUpdate = true } if (composer) composer.render(); else renderer.render(scene, camera) }
+  sampleTone()
+}
+// ---- inspect: frozen background while the item moves ----
+// In inspect the camera rests while the user turns / animates the item; everything else (cabinet, cases, glass, room) is a
+// still image. While the item is in motion (GTAO already faded out) that background is rendered ONCE into an HDR target of
+// the composer's size / MSAA (colour + depth) and replayed every frame by a full-screen quad that writes the stored depth:
+// the item still depth-tests against the cabinet, its transmission still refracts the background (the quad is opaque, so it
+// is in the transmission pass) and post (bloom / vignette / SMAA) runs on the same input — only the item's meshes are drawn.
+// Any camera move, resize, environment / streaming / door / highlight change drops the cache.
+let bgEpoch = 0
+const bgF = { rt: null, ok: false, epoch: -1, env: null, w: 0, h: 0, cam: new THREE.Matrix4(), proj: new THREE.Matrix4(), prev: new THREE.Matrix4(), still: 0 }
+const bgQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms: { tC: { value: null }, tD: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: 'uniform sampler2D tC; uniform sampler2D tD; varying vec2 vUv; void main(){ gl_FragColor = texture2D(tC, vUv); gl_FragDepth = texture2D(tD, vUv).x; }',
+  depthTest: true, depthWrite: true, depthFunc: THREE.AlwaysDepth, toneMapped: false,
+}))
+bgQuad.frustumCulled = false; bgQuad.renderOrder = -1e9; bgQuad.visible = false; bgQuad.material.userData.noAO = true; scene.add(bgQuad)
+// the free camera settles asymptotically (critically damped): sub-0.05 mm / µrad drift counts as still
+const matNear = (a, b, eps = 5e-5) => { for (let i = 0; i < 16; i++) if (Math.abs(a.elements[i] - b.elements[i]) > eps) return false; return true }
+const isFg = (o) => o === holder || o === bgQuad || Object.values(models).some((m) => m.disc === o)
+function freezeWanted() {
+  camera.updateMatrixWorld()
+  const still = matNear(bgF.prev, camera.matrixWorld); bgF.prev.copy(camera.matrixWorld); bgF.still = still ? bgF.still + 1 : 0
+  return mode === 'inspect' && !window.__noFreeze && lodOn && !(gtao && gtao.enabled) && bgF.still >= 1 && !owns('door') && hl.size === 0
+}
+const _bgHide = []
+function frozenDraw() {
+  const rt1 = composer.renderTarget1, w = rt1.width, h = rt1.height
+  if (!(bgF.ok && bgF.epoch === bgEpoch && bgF.w === w && bgF.h === h && bgF.env === scene.environment && matNear(bgF.cam, camera.matrixWorld) && matNear(bgF.proj, camera.projectionMatrix, 1e-6))) {
+    if (!bgF.rt) { bgF.rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: rt1.samples, depthTexture: new THREE.DepthTexture(w, h) }); bgQuad.material.uniforms.tC.value = bgF.rt.texture; bgQuad.material.uniforms.tD.value = bgF.rt.depthTexture }
+    else if (bgF.rt.width !== w || bgF.rt.height !== h) bgF.rt.setSize(w, h)
+    // background alone, with the current shadow map (no re-render without the item, so its cast shadow stays in the still)
+    const fg = [holder, ...Object.values(models).map((m) => m.disc)], vis = fg.map((o) => o.visible), au = renderer.shadowMap.autoUpdate, nu = renderer.shadowMap.needsUpdate
+    fg.forEach((o) => (o.visible = false)); bgQuad.visible = false; renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = false
+    const prevRT = renderer.getRenderTarget(); renderer.setRenderTarget(bgF.rt); renderer.clear(); renderer.render(scene, camera); renderer.setRenderTarget(prevRT)
+    fg.forEach((o, i) => (o.visible = vis[i])); renderer.shadowMap.autoUpdate = au; renderer.shadowMap.needsUpdate = nu
+    Object.assign(bgF, { ok: true, epoch: bgEpoch, w, h, env: scene.environment }); bgF.cam.copy(camera.matrixWorld); bgF.proj.copy(camera.projectionMatrix)
+  }
+  _bgHide.length = 0
+  const walk = (o) => { if (isFg(o)) return; if (o.visible && (o.isMesh || o.isLine || o.isPoints || o.isSprite)) { o.visible = false; _bgHide.push(o) } for (const c of o.children) walk(c) }
+  for (const c of scene.children) walk(c)
+  bgQuad.visible = true; composer.render(); bgQuad.visible = false
+  for (const o of _bgHide) o.visible = true
+}
 // ---- adaptive title chips: read the rendered pixels behind each chip (same frame, before the buffer is presented),
 // composite the chip surface over them and pick the tone (dark text on light chip / light text on dark chip) with the
 // higher WCAG contrast. Throttled; a trailing sample runs once motion stops.
@@ -1189,22 +1262,50 @@ const TONES = { light: { c: [250, 248, 244], a: 0.78, ink: [31, 42, 40], mut: [7
 const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
 const relL = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
 const wcag = (a, b) => { const x = relL(a), y = relL(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
-let toneAt = 0, toneForce = true, toneTimer = 0, tonePx = null
+let toneAt = 0, toneForce = true, toneTimer = 0, tonePx = null, toneQ = null
+// The chips' tone is read back from the rendered frame. A synchronous readPixels right after the frame made the CPU wait for
+// the GPU to finish the whole frame (every ~0.45 s; 2 reads per sample) — a visible hitch on every sample. Now: never while
+// the item moves (trailing sample once it rests), and on WebGL2 the read is queued into a pixel-pack buffer + fence and
+// collected a few ms later without blocking.
 function sampleTone() {
-  const now = performance.now(); if (!toneForce && now - toneAt < 450) { clearTimeout(toneTimer); toneTimer = setTimeout(() => { toneForce = true; dirty = Math.max(dirty, 1) }, 500); return }
+  const now = performance.now()
+  if (lodOn || rot.dragging || toneQ) { clearTimeout(toneTimer); toneTimer = setTimeout(() => { toneForce = true; dirty = Math.max(dirty, 1) }, 500); return }
+  if (!toneForce && now - toneAt < 450) { clearTimeout(toneTimer); toneTimer = setTimeout(() => { toneForce = true; dirty = Math.max(dirty, 1) }, 500); return }
   toneAt = now; toneForce = false; const gl = renderer.getContext(), pr = renderer.getPixelRatio(), W = gl.drawingBufferWidth, H = gl.drawingBufferHeight
-  const tint = new THREE.Color(PRESETS[env.preset].tint), tc = [tint.r * 255, tint.g * 255, tint.b * 255], out = {}
+  const regs = []; let n = 0
   for (const el of [$('ihead'), $('brand')]) {
     if (el.id === 'ihead' && mode !== 'inspect') continue
     const r = el.getBoundingClientRect(); if (r.width < 4) continue
     const x = Math.max(0, Math.floor(r.left * pr)), y = Math.max(0, Math.floor(H - r.bottom * pr)), w = Math.min(Math.ceil(r.width * pr), W - x), h = Math.min(Math.ceil(r.height * pr), H - y); if (w < 1 || h < 1) continue
-    const n = w * h * 4; if (!tonePx || tonePx.length < n) tonePx = new Uint8Array(n)
-    gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, tonePx)
-    let R = 0, G = 0, B = 0, c = 0, lo = 1, hi = 0; const st = Math.max(1, Math.floor((w * h) / 4000))
-    for (let i = 0; i < w * h; i += st) { const o = i * 4, l = relL([tonePx[o], tonePx[o + 1], tonePx[o + 2]]); R += tonePx[o]; G += tonePx[o + 1]; B += tonePx[o + 2]; c++; if (l < lo) lo = l; if (l > hi) hi = l }
+    regs.push({ id: el.id, x, y, w, h, off: n }); n += w * h * 4
+  }
+  if (!regs.length) return
+  if (typeof WebGL2RenderingContext === 'undefined' || !(gl instanceof WebGL2RenderingContext)) {
+    if (!tonePx || tonePx.length < n) tonePx = new Uint8Array(n)
+    for (const g of regs) gl.readPixels(g.x, g.y, g.w, g.h, gl.RGBA, gl.UNSIGNED_BYTE, tonePx.subarray(g.off, g.off + g.w * g.h * 4))
+    toneApply(regs, tonePx); return
+  }
+  const pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, n, gl.STREAM_READ)
+  for (const g of regs) gl.readPixels(g.x, g.y, g.w, g.h, gl.RGBA, gl.UNSIGNED_BYTE, g.off)
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null)
+  const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); toneQ = { pbo, sync, regs, n, t: now }
+  const poll = () => {
+    const q = toneQ; if (!q) return
+    const st = gl.clientWaitSync(q.sync, 0, 0)
+    if (st === gl.TIMEOUT_EXPIRED && performance.now() - q.t < 2000) { setTimeout(poll, 8); return }
+    if (st !== gl.WAIT_FAILED && st !== gl.TIMEOUT_EXPIRED) { if (!tonePx || tonePx.length < q.n) tonePx = new Uint8Array(q.n); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, q.pbo); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, tonePx, 0, q.n); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); toneApply(q.regs, tonePx) }
+    gl.deleteSync(q.sync); gl.deleteBuffer(q.pbo); toneQ = null
+  }
+  setTimeout(poll, 4)
+}
+function toneApply(regs, px) {
+  const tint = new THREE.Color(PRESETS[env.preset].tint), tc = [tint.r * 255, tint.g * 255, tint.b * 255], out = {}
+  for (const g of regs) {
+    const cnt = g.w * g.h; let R = 0, G = 0, B = 0, c = 0; const st = Math.max(1, Math.floor(cnt / 4000))
+    for (let i = 0; i < cnt; i += st) { const o = g.off + i * 4; R += px[o]; G += px[o + 1]; B += px[o + 2]; c++ }
     const bg = [R / c, G / c, B / c], res = {}
     for (const [k, T] of Object.entries(TONES)) { const chip = T.c.map((v, i) => v * T.mix + tc[i] * (1 - T.mix)), comp = chip.map((v, i) => v * T.a + bg[i] * (1 - T.a)); res[k] = { title: +wcag(T.ink, comp).toFixed(2), sub: +wcag(T.mut, comp).toFixed(2) } }
-    out[el.id] = { bgL: +relL(bg).toFixed(3), ...res }
+    out[g.id] = { bgL: +relL(bg).toFixed(3), ...res }
   }
   // one tone for both chips (consistent look): maximise the worst-case subtitle contrast, with hysteresis
   const ks = Object.keys(out); if (!ks.length) return
@@ -1218,14 +1319,18 @@ function sampleTone() {
 // animation (cover out / back, disc, return) never ends in a visible pop.
 let lodOn = false, lodIdle = 0, lodSlow = 0, lodDpr = false, aoW = 1, aoP = 1, lodF = 0
 const GTAO_BLEND = 0.6
-function interactionLOD(active, dt) {
+let shadowIdle = false
+function interactionLOD(active, dt, objMoving = true) {
   if (active) { lodIdle = 0; lodOn = true } else if (lodOn && (lodIdle += dt) > 0.25) lodOn = false
   if (gtao) {
     const aoT = lodOn ? 0 : 1; if (aoP !== aoT) { aoP = aoT > aoP ? Math.min(aoT, aoP + dt / 0.45) : Math.max(aoT, aoP - dt / 0.2); dirty = Math.max(dirty, 1) }
     aoW = aoP * aoP * aoP * (aoP * (aoP * 6 - 15) + 10) // smootherstep: the fade starts and ends with zero rate
     gtao.blendIntensity = GTAO_BLEND * aoW; gtao.enabled = aoW > 0.002
   }
-  if (lodOn) { renderer.shadowMap.autoUpdate = false; if ((++lodF & 1) === 0) renderer.shadowMap.needsUpdate = true } else if (!renderer.shadowMap.autoUpdate) { renderer.shadowMap.autoUpdate = true; renderer.shadowMap.needsUpdate = true }
+  // shadow casters only move with objects: on the shelf a camera-only move (parallax / pan) re-rendered the 2 shadow maps every frame
+  if (!objMoving) { if (!shadowIdle) { shadowIdle = true; renderer.shadowMap.autoUpdate = false; renderer.shadowMap.needsUpdate = true } }
+  else if (lodOn) { shadowIdle = false; renderer.shadowMap.autoUpdate = false; if ((++lodF & 1) === 0) renderer.shadowMap.needsUpdate = true }
+  else if (shadowIdle || !renderer.shadowMap.autoUpdate) { shadowIdle = false; renderer.shadowMap.autoUpdate = true; renderer.shadowMap.needsUpdate = true }
   if (rot.dragging && dt > 0.024) { if (++lodSlow > 20 && !lodDpr && composer && renderer.getPixelRatio() > 1) { lodDpr = true; composer.setPixelRatio(1) } }
   else { lodSlow = Math.max(0, lodSlow - 1); if (lodDpr && !rot.dragging) { lodDpr = false; composer?.setPixelRatio(renderer.getPixelRatio()); dirty = Math.max(dirty, 1) } }
 }
@@ -1235,6 +1340,7 @@ function perfSample(ms, dt) {
   if (pinned || document.hidden) return
   perf.push(Math.max(ms, Math.min(dt * 1000, 200))); if (perf.length < 45) return
   const m = perf.sort((a, b) => a - b)[22]; perf.length = 0
+  if (m > 40 && renderer.getPixelRatio() > 1.05 && prStep > 0.6) { prStep = Math.max(0.6, prStep - 0.2); sizeComposer(); dirty = 3; return } // resolution first (invisible-ish), effects last
   if (m > 40 && tier !== 'low') { tier = TIERS[TIERS.indexOf(tier) - 1]; setupTier() }
 }
 setupTier()
@@ -1623,7 +1729,7 @@ function applyEnv(persist = true) {
   scene.background.set(P.back).multiplyScalar(Math.min(bg, 2)); skirting.material.color.set(P.flat ? P.wall : 0x2c2825).multiplyScalar(P.flat ? bg * 0.9 : 1)
   const seq = ++envSeq; loadHdri(HDRI[P.hdri] || 'gallery').then((e) => { if (seq !== envSeq || !e) return; scene.environment = e; scene.environmentIntensity = P.env * Math.sqrt(Math.max(env.ambient, 0.05)) * (+(qs.get('env') || 1)); dirty = 3 })
   if (persist) try { localStorage.setItem('showcase-env', JSON.stringify(env)) } catch {}
-  renderer.shadowMap.needsUpdate = true; if (typeof scheduleProbes === 'function' && BAKED) scheduleProbes(); dirty = 3
+  renderer.shadowMap.needsUpdate = true; bgEpoch++; if (typeof scheduleProbes === 'function' && BAKED) scheduleProbes(); dirty = 3
 }
 function renderEnvUI() {
   const pr = $('presets'); if (!pr) return
@@ -1681,6 +1787,7 @@ async function boot() {
     return { mode, what, vis: mode === 'inspect' ? visibleNdc().map((v) => +v.toFixed(3)) : null, cam3: camera.position.distanceTo(controls.target).toFixed(2), cab: pr(cab), foc: pr(f), focPivot: fc && [+fc.x.toFixed(4), +fc.y.toFixed(4)], vo, canvas: [r.left, r.width, innerWidth, renderer.domElement.width], par: par.toArray(), cam: camera.position.toArray().map((v) => +v.toFixed(3)), tg: controls.target.toArray().map((v) => +v.toFixed(3)) }
   }
   window.__sc.cart = () => { const d = model.disc; let n = 0, labs = []; d.traverse(o => { n++; if (o.isMesh && o.material === model.labelMat) labs.push({ map: !!o.material.map, pos: o.position.toArray().map(v=>+v.toFixed(4)), vis: o.visible, parent: o.parent?.type }) }); return { kids: n, labs, scale: d.scale.x, quat: d.quaternion.toArray().map(v=>+v.toFixed(3)), pos: d.position.toArray().map(v=>+v.toFixed(3)), kind: model.kind } }
+  window.__sc.bgf = () => ({ ok: bgF.ok, still: bgF.still, lodOn, gtao: !!(gtao && gtao.enabled), pr: renderer.getPixelRatio(), smaa: smaa ? smaa.enabled : null, shAuto: renderer.shadowMap.autoUpdate, tone: $('brand').dataset.tone })
   window.__sc.shell = () => { const m = model.shellMat; return { color: '#'+m.color.getHexString(), att: m.attenuationColor ? '#'+m.attenuationColor.getHexString() : null, dist: m.attenuationDistance, transmission: m.transmission, opacity: m.opacity, thickness: m.thickness, transparent: m.transparent, LITE: !!mobile, plat: model.kind, sheetK } }
   window.__sc.spine = (cmd) => { if (cmd === 'up') moveShelf(1); if (cmd === 'down') moveShelf(-1); if (cmd === 'right') panShelf(0.6); if (cmd === 'left') panShelf(-0.6); if (cmd && cmd.focus != null) focusItem(entries[cmd.focus].id)
     const zF = 0.55, dz = camera.position.z - zF, tanH = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2); let hi = 0, tot = 0, texH = 0
@@ -1724,7 +1831,7 @@ function bakeProbes() {
   if (!probes) { probes = new LightProbeGridWebGL(CW, inH, CD, 6, 6, 3); scene.add(probes) }
   probes.position.set(page * CAB_PITCH, PLINTH + inH / 2, -0.05)
   const hid = []; for (const o of [...proxies.values(), holder, model.disc]) if (o.visible) { o.visible = false; hid.push(o) }
-  const t0 = performance.now(); probes.bake(renderer, scene, { cubemapSize: 16, near: 0.02, far: 40 }); hid.forEach((o) => (o.visible = true))
+  const t0 = performance.now(); probes.bake(renderer, scene, { cubemapSize: 16, near: 0.02, far: 40 }); hid.forEach((o) => (o.visible = true)); bgEpoch++
   console.info('[showcase] probe grid baked', Math.round(performance.now() - t0), 'ms'); dirty = 3
 }
 boot().then(scheduleProbes)

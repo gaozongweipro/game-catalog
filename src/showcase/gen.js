@@ -95,7 +95,10 @@ export function canvas(w, h) { const c = document.createElement('canvas'); c.wid
 // layout code (and consumers that read .width/.height for aspect) is unchanged while the bitmap is sharper.
 const lowGPU = typeof navigator !== 'undefined' && (/Mobi|Android|iPhone|iPad/.test(navigator.userAgent) || (navigator.hardwareConcurrency || 8) <= 4)
 export const PRINT_SCALE = lowGPU ? 1.5 : 2
-export function hcanvas(w, h, S = PRINT_SCALE) {
+let printScale = PRINT_SCALE
+/** Run `fn` with print canvases rendered at scale `s` (shelf textures need ~1024 px, not the 2× print bitmap). */
+export function withPrintScale(s, fn) { const o = printScale; printScale = s; try { return fn() } finally { printScale = o } }
+export function hcanvas(w, h, S = printScale) {
   const c = canvas(Math.round(w * S), Math.round(h * S)), g = c.getContext('2d')
   g.scale(S, S); g.imageSmoothingQuality = 'high'
   Object.defineProperty(c, 'width', { value: w, configurable: true }); Object.defineProperty(c, 'height', { value: h, configurable: true })
@@ -322,6 +325,16 @@ export function genBooklet(cover, title) {
   g.fillStyle = '#c9b48a'; g.font = '500 18px Arial'; g.fillText('MANUAL · 说明书', 28, 575); return c
 }
 /** Full art set for the case model from entry + decoded images. */
+/** Shelf proxy art: only the three faces a shelf case shows (front / spine / back), same layout as buildArt. */
+export function buildShelfArt(entry, imgs) {
+  const sl = entry.slots || {}, cov = imgs.front, band = entry.band !== false
+  const color = cov ? dominantColor(cov) : null, P = entry.platform || 'ps5', K = P === 'ns2' && !!entry.keyCard
+  return {
+    front: genFront(cov, sl.front?.crop, entry.title, band, P, K),
+    spine: genSpine(imgs.spine, sl.spine?.crop, entry.title, color, band, P),
+    back: genBack(imgs.back, sl.back?.crop, cov, entry.title, color, band, P),
+  }
+}
 export function buildArt(entry, imgs) {
   const sl = entry.slots || {}, cov = imgs.front, band = entry.band !== false
   const color = cov ? dominantColor(cov) : null
