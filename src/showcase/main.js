@@ -1199,6 +1199,10 @@ function draw() {
 // is in the transmission pass) and post (bloom / vignette / SMAA) runs on the same input — only the item's meshes are drawn.
 // Any camera move, resize, environment / streaming / door / highlight change drops the cache.
 let bgEpoch = 0
+// Off by default: in practice the inspect camera keeps settling during a turn, so the cache engaged only intermittently and every
+// switch between the cached and the live path showed a slightly different frame (MSAA-resolved edges, the item's frozen
+// shadow) — a visible flicker. Kept behind ?freeze for experiments.
+const FREEZE = qs.has('freeze')
 const bgF = { rt: null, ok: false, epoch: -1, env: null, w: 0, h: 0, cam: new THREE.Matrix4(), proj: new THREE.Matrix4(), prev: new THREE.Matrix4(), pprev: new THREE.Matrix4(), still: 0 }
 const bgQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
   uniforms: { tC: { value: null }, tD: { value: null } },
@@ -1213,7 +1217,7 @@ const isFg = (o) => o === holder || o === bgQuad || Object.values(models).some((
 function freezeWanted() {
   camera.updateMatrixWorld()
   const still = matNear(bgF.prev, camera.matrixWorld) && matNear(bgF.pprev, camera.projectionMatrix, 1e-6); bgF.prev.copy(camera.matrixWorld); bgF.pprev.copy(camera.projectionMatrix); bgF.still = still ? bgF.still + 1 : 0
-  return mode === 'inspect' && !window.__noFreeze && lodOn && !(gtao && gtao.enabled) && bgF.still >= 2 && !owns('door') && hl.size === 0
+  return FREEZE && mode === 'inspect' && !window.__noFreeze && lodOn && !(gtao && gtao.enabled) && bgF.still >= 2 && !owns('door') && hl.size === 0
 }
 const _bgHide = []
 function frozenDraw() {
