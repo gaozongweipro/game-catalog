@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#f3f1ec" />
+<title>3D 陈列柜 · 3D Showcase</title>
+<link rel="icon" type="image/svg+xml" href="/game-catalog/favicon.svg" />
+  <script type="module" crossorigin src="/game-catalog/assets/showcase-D1oAqdRF.js"></script>
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/modulepreload-polyfill-P2Xu9kJm.js">
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/art-COjUhXQs.js">
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/gen-CQlNHAK4.js">
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/RoundedBoxGeometry-BAZC42xB.js">
+  <link rel="modulepreload" crossorigin href="/game-catalog/assets/Pass-CwB_1gad.js">
+  <link rel="stylesheet" crossorigin href="/game-catalog/assets/gen-D1GYXYOt.css">
+  <link rel="stylesheet" crossorigin href="/game-catalog/assets/showcase-D_ZA_Pn0.css">
+</head>
+<body>
+<canvas id="c"></canvas>
+<header class="bar">
+  <a id="back" class="pill" href="./">←</a>
+  <div class="brand chip" id="brand" data-tone="light"><b id="brandT">陈列柜</b><span id="brandS">我的电子实体版</span></div>
+  <div class="tools">
+    <div class="seg" id="viewSeg" role="group"><button data-v="spine" aria-pressed="true" id="vSpine">书脊</button><button data-v="front" aria-pressed="false" id="vFront">正面</button></div>
+    <button class="pill icon" id="envBtn" aria-label="environment" data-ic="gear"></button>
+    <button class="pill" id="menuBtn" aria-label="menu">⋯</button>
+    <button class="pill" id="langBtn">EN</button>
+  </div>
+  <div class="menu hidden" id="menu">
+    <button id="mExport">导出收藏</button>
+    <button id="mImport">导入收藏</button>
+    <button id="mLang" class="narrow-only">English</button>
+    <input type="file" id="importFile" accept=".json,application/json" hidden />
+  </div>
+</header>
+<nav class="tb" id="tbShelf" aria-label="shelf toolbar">
+  <button class="tbtn mob" id="tFilter" data-ic="filter"><span id="tFilterT">筛选</span><i class="dot hidden" id="tFilterDot"></i></button>
+  <div class="tb-inline" id="shelfInline">
+    <label class="search"><i data-ic="search"></i><input id="q" type="search" placeholder="搜索 / Search" autocomplete="off" /></label>
+    <div class="seg" id="pf"><button data-p="all" aria-pressed="true">全部</button><button data-p="ps5" aria-pressed="false">PS5</button><button data-p="ns" aria-pressed="false">NS</button><button data-p="ns2" aria-pressed="false">NS2</button></div>
+    <select id="sort"><option value="custom">自定义顺序</option><option value="name">名称</option><option value="date">日期</option><option value="platform">平台</option></select>
+  </div>
+  <div class="pager hidden" id="pager"><button id="pgPrev" aria-label="prev" data-ic="chevL"></button><span id="pgLbl">1 / 1</span><select id="pgJump" aria-label="jump"></select><button id="pgNext" aria-label="next" data-ic="chevR"></button></div>
+  <button class="tbtn mob" id="tView" data-ic="spines"><span id="tViewT">书脊</span></button>
+  <button class="tbtn mob" id="tEnv" data-ic="gear"><span id="tEnvT">环境</span></button>
+  <button class="tbtn pri" id="makeBtn" data-ic="plus"><span id="makeT">制作</span></button>
+</nav>
+<div class="shelfnav off" id="shelfNav" aria-label="shelves"><button class="pill icon" id="shUp" data-ic="chevL" aria-label="shelf up"></button><button class="pill icon" id="shDn" data-ic="chevR" aria-label="shelf down"></button></div>
+<div class="fsheet hidden" id="fsheet"><div class="grab"></div><div class="fs-body" id="fsBody"></div></div>
+
+<div class="loading" id="loading"><div class="spin"></div><p id="loadT">正在布置展柜…</p></div>
+<div class="empty hidden" id="empty"><div class="card"><div class="glyph">▢</div><h2 id="emptyH">展柜还是空的</h2><p id="emptyP">上传封面，制作你的第一张电子实体版</p><button class="primary" id="emptyBtn">开始制作</button></div></div>
+
+<section class="inspect hidden" id="inspect">
+  <div class="ihead chip" id="ihead" data-tone="light"><h2 id="iTitle"></h2><p id="iSub"></p></div>
+  <nav class="tb ibar" id="ibar" aria-label="inspect toolbar">
+    <button id="iBack" class="tbtn" data-ic="back"><span id="iBackT">返回</span></button>
+    <button id="iOpen" class="tbtn" data-ic="open"><span>打开</span></button>
+    <button id="iDisc" class="tbtn" data-ic="disc"><span>取盘</span></button>
+    <button id="iSheet" class="tbtn" data-ic="sheetOut"><span>抽出封面</span></button>
+    <button id="iFlip" class="tbtn hidden" data-ic="flip"><span>翻面</span></button>
+    <button id="iReset" class="tbtn hidden" data-ic="reset"><span>复位</span></button>
+    <button id="iMore" class="tbtn" aria-label="more" data-ic="more"><span id="iMoreT">更多</span></button>
+  </nav>
+  <div class="imore hidden" id="imore">
+    <button id="iEdit" data-ic="edit"><span id="iEditT">编辑</span></button><button id="iLeft" data-ic="chevL"><span id="iLeftT">前移</span></button><button id="iRight" data-ic="chevR"><span id="iRightT">后移</span></button><button id="iDel" class="danger" data-ic="trash"><span id="iDelT">删除</span></button>
+  </div>
+</section>
+
+<section class="envp hidden" id="envp" aria-label="environment and lighting">
+  <div class="grab"></div>
+  <div class="envh"><b id="envT">环境与灯光</b><button class="tbtn ic" id="envClose" aria-label="close" data-ic="x"></button></div>
+  <div class="presets" id="presets"></div>
+  <div class="sliders" id="sliders"></div>
+  <div class="envf"><button class="tbtn" id="envReset" data-ic="reset"><span id="envResetT">恢复预设</span></button></div>
+</section>
+
+<section class="editor hidden" id="editor" aria-label="editor" aria-modal="false">
+  <div class="grab"></div>
+  <header class="ehead">
+    <div class="eh-t"><h2 id="eTitleH">制作电子实体版</h2></div>
+    <button class="ibtn" id="eClose" aria-label="close" data-ic="x"></button>
+  </header>
+  <div class="ebody" id="ebody">
+    <section class="egroup">
+      <label class="field" for="fTitle"><span class="glabel" id="lTitle">游戏名称</span>
+        <span class="inp"><i data-ic="search"></i><input id="fTitle" maxlength="80" autocomplete="off" enterkeyhint="search" placeholder="中 / 日 / 英文游戏名，可选" /></span></label>
+      <div class="sugg hidden" id="sugg"></div>
+    </section>
+    <section class="egroup">
+      <span class="glabel" id="gPlat">平台</span>
+      <div class="seg plat" id="platSeg"><button aria-pressed="true" data-p="ps5">PS5</button><button aria-pressed="false" data-p="ns">Switch</button><button aria-pressed="false" data-p="ns2">Switch 2</button></div>
+      <div class="toggles">
+        <label class="tgl hidden" id="keyWrap"><span id="lKey">Game-Key Card</span><input type="checkbox" role="switch" id="fKey" /></label>
+      </div>
+    </section>
+    <section class="egroup">
+      <span class="glabel" id="gArt">封面与印刷</span>
+      <div class="slots" id="slots"></div>
+    </section>
+  </div>
+  <footer class="efoot"><button class="btn sec danger hidden" id="eDel" aria-label="delete" data-ic="trash"><span class="lbl" id="eDelT">删除</span></button><button class="btn sec" id="eCancel">取消</button><button class="btn pri" id="eSave">保存</button></footer>
+  <div class="crop hidden" id="crop" role="dialog" aria-labelledby="cTitle">
+    <header class="ehead chead"><button class="ibtn" id="cBack" aria-label="back" data-ic="back"></button><div class="eh-t"><h2 id="cTitle"></h2><p id="cHint">拖动移动 · 双指或滚轮缩放</p></div></header>
+    <div class="cwrap" id="cwrap"><canvas id="cc"></canvas></div>
+    <footer class="cfoot">
+      <div class="zoom"><button class="ibtn sm" id="cZoomOut" aria-label="zoom out" data-ic="minus"></button><input type="range" id="cZoom" min="1" max="4" step="0.01" value="1" aria-label="zoom" /><button class="ibtn sm" id="cZoomIn" aria-label="zoom in" data-ic="plus"></button></div>
+      <div class="cact">
+        <button class="btn sec" id="cReset" data-ic="reset"><span class="lbl">重置</span></button><button class="btn sec" id="cReplace" data-ic="upload"><span class="lbl">换图</span></button><button class="btn sec danger" id="cRemove" data-ic="trash"><span class="lbl">移除</span></button><button class="btn pri" id="cDone" data-ic="check"><span class="lbl">完成</span></button>
+      </div>
+    </footer>
+  </div>
+  <input type="file" id="fileIn" accept="image/*" hidden />
+</section>
+<div class="dlg-scrim hidden" id="dlg"><div class="dlg" role="alertdialog" aria-modal="true" aria-labelledby="dlgH" aria-describedby="dlgP"><div class="dlg-ic" id="dlgIc"></div><h3 id="dlgH"></h3><p id="dlgP"></p><div class="dlg-act"><button class="btn sec" id="dlgNo"></button><button class="btn pri" id="dlgYes"></button></div></div></div>
+<div class="toast hidden" id="toast"></div>
+</body>
+</html>
