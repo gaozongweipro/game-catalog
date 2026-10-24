@@ -95,7 +95,7 @@ select option{color:#22302d}
 body:not(.mode-shelf) #tbShelf{opacity:0;pointer-events:none;transform:translate(-50%,20px);transition:opacity .25s,transform .25s}
 #tbShelf{transition:opacity .25s,transform .25s}
 .imore{position:fixed;right:max(12px,calc(50% - 250px));bottom:calc(84px + env(safe-area-inset-bottom));z-index:7;background:var(--surf-solid);border-radius:var(--r-md);padding:6px;display:flex;flex-direction:column;min-width:170px;box-shadow:var(--sh-3);pointer-events:auto;animation:pop .18s ease-out}
-.imore button,.menu button{display:flex;align-items:center;gap:10px;text-align:left;padding:0 12px;min-height:var(--hit);border-radius:var(--r-sm);font-size:var(--fs-md);color:var(--ink)}.imore button:hover,.menu button:hover{background:var(--fill)}
+.imore button,.menu button{display:flex;align-items:center;gap:10px;text-align:left;padding:0 12px;min-height:max(44px,var(--hit));border-radius:var(--r-sm);font-size:var(--fs-md);color:var(--ink)}.imore button:hover,.menu button:hover{background:var(--fill)}
 .imore svg{width:18px;height:18px;color:var(--mut)}.imore .danger svg{color:var(--danger)}
 .fsheet{position:fixed;left:10px;right:10px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:7;background:var(--surf-solid);border-radius:var(--r-lg);box-shadow:var(--sh-3);padding:4px 14px 14px;animation:sheet .28s cubic-bezier(.2,.8,.2,1)}
 .fs-body .tb-inline{flex-direction:column;align-items:stretch;gap:10px}.fs-body .search{height:var(--hit)}.fs-body .search input{width:100%;font-size:16px}
@@ -233,3 +233,15 @@ body:not(.mode-shelf) .shelfnav,.shelfnav.off{opacity:0;pointer-events:none}
   .shelfnav { right: calc(8px + env(safe-area-inset-right)); gap: 14px }
   .shelfnav .pill.icon { width: 48px; min-height: 48px }
 }
+
+/* delete / undo */
+.toast{display:flex;align-items:center;gap:var(--s3)}
+.toast.has-act{padding:4px 6px 4px 16px}
+.toast-act{min-height:44px;min-width:56px;padding:0 14px;border-radius:var(--r-sm);color:#9fe3d3;font-weight:var(--fw-b);font-size:14px}
+.toast-act:hover{background:rgba(255,255,255,.1)}
+.toast-act:focus-visible{outline:2px solid #9fe3d3;outline-offset:-2px}
+body.deleting #inspect,body.deleting canvas{pointer-events:none}
+body.deleting .ibar{opacity:0;transition:opacity .2s}
+.efoot .btn.danger{flex:0 0 auto;min-width:48px;padding:0 var(--s3)}
+.efoot .btn.danger .lbl{display:none}
+@media(min-width:900px){.efoot .btn.danger .lbl{display:inline}}

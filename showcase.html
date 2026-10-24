@@ -70,7 +70,7 @@
 <section class="editor hidden" id="editor" aria-label="editor" aria-modal="false">
   <div class="grab"></div>
   <header class="ehead">
-    <div class="eh-t"><h2 id="eTitleH">制作电子实体版</h2><p id="eSubH">实时 3D 预览 · 所有字段均可选</p></div>
+    <div class="eh-t"><h2 id="eTitleH">制作电子实体版</h2></div>
     <button class="ibtn" id="eClose" aria-label="close" data-ic="x"></button>
   </header>
   <div class="ebody" id="ebody">
@@ -82,19 +82,16 @@
     <section class="egroup">
       <span class="glabel" id="gPlat">平台</span>
       <div class="seg plat" id="platSeg"><button aria-pressed="true" data-p="ps5">PS5</button><button aria-pressed="false" data-p="ns">Switch</button><button aria-pressed="false" data-p="ns2">Switch 2</button></div>
-      <p class="note" id="platNote"></p>
       <div class="toggles">
-        <label class="tgl"><span id="lBand">PS5 顶条</span><input type="checkbox" role="switch" id="fBand" checked /></label>
         <label class="tgl hidden" id="keyWrap"><span id="lKey">Game-Key Card</span><input type="checkbox" role="switch" id="fKey" /></label>
       </div>
     </section>
     <section class="egroup">
       <span class="glabel" id="gArt">封面与印刷</span>
       <div class="slots" id="slots"></div>
-      <p class="note" id="slotNote">只需上传正面封面，其余会自动生成；点卡片可上传或裁切。</p>
     </section>
   </div>
-  <footer class="efoot"><button class="btn sec" id="eCancel">取消</button><button class="btn pri" id="eSave">保存</button></footer>
+  <footer class="efoot"><button class="btn sec danger hidden" id="eDel" aria-label="delete" data-ic="trash"><span class="lbl" id="eDelT">删除</span></button><button class="btn sec" id="eCancel">取消</button><button class="btn pri" id="eSave">保存</button></footer>
   <div class="crop hidden" id="crop" role="dialog" aria-labelledby="cTitle">
     <header class="ehead chead"><button class="ibtn" id="cBack" aria-label="back" data-ic="back"></button><div class="eh-t"><h2 id="cTitle"></h2><p id="cHint">拖动移动 · 双指或滚轮缩放</p></div></header>
     <div class="cwrap" id="cwrap"><canvas id="cc"></canvas></div>

@@ -9,6 +9,7 @@ import { createCaseModel, platformSpec, W, H, D } from '../demo/caseModel.js'
 import { loadRE4 } from '../demo/art.js'
 import { db, uid, exportCollection, importCollection } from './db.js'
 import { searchCatalog, searchWiki, fetchImageBlob, loadCatalog, norm } from './lookup.js'
+import { createBurst } from './fx.js'
 import { resample, bitmapSize, prepareRetail } from './gen.js'
 import { TEMPLATES, templatesFor, NS_BAND, NS2_BAND, NS2_FRAME, BLEED, canvas, downscale, blobToImage, drawCropped, buildArt } from './gen.js'
 import { BANNER } from '../demo/caseModel.js'
@@ -49,16 +50,20 @@ const S = {
     sample: 'Sample · my physical copy', made: 'Digital physical edition', needTitle: 'Please enter a title', needFront: 'Please upload a front cover', saved: 'Saved to the cabinet', deleted: 'Deleted', delQ: 'Delete “%s”?', exported: 'Exported', imported: 'Imported %d item(s)', badFile: 'Unrecognised file',
     sampleRO: 'The sample entry is read-only', processing: 'Processing…', guideBand: 'PS5 band', guideBleed: 'Bleed', hub: 'Hub', title: '3D Showcase · digital physical editions' },
 }
-Object.assign(S.zh, { gPlat: '平台', gArt: '封面与印刷', eSubH: '实时 3D 预览 · 所有字段均可选', dCancel: '取消', delH: '删除这件收藏？', delP: '「%s」会从展柜中移除，此操作无法撤销。', delOk: '删除', rmH: '移除这张图片？', rmP: '该位置会恢复为自动生成的图案。', rmOk: '移除', discH: '放弃未保存的修改？', discP: '关闭后，本次编辑的内容不会保存。', discOk: '放弃', discNo: '继续编辑', stAuto: '自动生成', stUp: '已上传', stWeb: '联网封面' })
-Object.assign(S.en, { gPlat: 'Platform', gArt: 'Covers & prints', eSubH: 'Live 3D preview · every field optional', dCancel: 'Cancel', delH: 'Delete this item?', delP: '“%s” will be removed from the cabinet. This can’t be undone.', delOk: 'Delete', rmH: 'Remove this image?', rmP: 'This slot goes back to generated artwork.', rmOk: 'Remove', discH: 'Discard unsaved changes?', discP: 'Closing now won’t save this edit.', discOk: 'Discard', discNo: 'Keep editing', stAuto: 'Generated', stUp: 'Uploaded', stWeb: 'Web cover' })
+Object.assign(S.zh, { undo: '撤销', undone: '已恢复', delFail: '删除失败，请重试', eDelT: '删除', gPlat: '平台', gArt: '封面与印刷', dCancel: '取消', delH: '删除这件收藏？', delP: '「%s」将从展柜中移除，删除后可在提示条中撤销。', delOk: '删除', rmH: '移除这张图片？', rmP: '该位置会恢复为自动生成的图案。', rmOk: '移除', discH: '放弃未保存的修改？', discP: '关闭后，本次编辑的内容不会保存。', discOk: '放弃', discNo: '继续编辑', stAuto: '自动生成', stUp: '已上传', stWeb: '联网封面' })
+Object.assign(S.en, { undo: 'Undo', undone: 'Restored', delFail: 'Delete failed — please try again', eDelT: 'Delete', gPlat: 'Platform', gArt: 'Covers & prints', dCancel: 'Cancel', delH: 'Delete this item?', delP: '“%s” will be removed from the cabinet. You can undo right after.', delOk: 'Delete', rmH: 'Remove this image?', rmP: 'This slot goes back to generated artwork.', rmOk: 'Remove', discH: 'Discard unsaved changes?', discP: 'Closing now won’t save this edit.', discOk: 'Discard', discNo: 'Keep editing', stAuto: 'Generated', stUp: 'Uploaded', stWeb: 'Web cover' })
 const t = (k) => S[lang][k] ?? k
 function syncLang() {
   document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'; document.title = t('title')
-  for (const k of ['brandT', 'brandS', 'vSpine', 'vFront', 'makeT', 'loadT', 'emptyH', 'emptyP', 'emptyBtn', 'mExport', 'mImport', 'mLang', 'iBackT', 'iMoreT', 'tFilterT', 'tEnvT', 'iEditT', 'iLeftT', 'iRightT', 'iDelT', 'envT', 'envResetT', 'eCancel', 'eSave', 'lTitle', 'lBand', 'lKey', 'slotNote', 'cHint', 'cReset', 'cReplace', 'cRemove', 'cDone', 'gPlat', 'gArt', 'eSubH']) { const el = $(k); if (el) (el.querySelector(':scope>.lbl') || el).textContent = t(k) }
+  for (const k of ['brandT', 'brandS', 'vSpine', 'vFront', 'makeT', 'loadT', 'emptyH', 'emptyP', 'emptyBtn', 'mExport', 'mImport', 'mLang', 'iBackT', 'iMoreT', 'tFilterT', 'tEnvT', 'iEditT', 'iLeftT', 'iRightT', 'iDelT', 'envT', 'envResetT', 'eCancel', 'eSave', 'lTitle', 'lKey', 'cHint', 'cReset', 'cReplace', 'cRemove', 'cDone', 'gPlat', 'gArt', 'eDelT']) { const el = $(k); if (el) (el.querySelector(':scope>.lbl') || el).textContent = t(k) }
   $('langBtn').textContent = lang === 'en' ? '中文' : 'EN'; $('back').href = BASE
   if (typeof syncViewBtn === 'function') syncViewBtn(); syncInspectUI(); if (editing) renderSlots(); if (typeof renderEnvUI === 'function') renderEnvUI()
 }
-function toast(msg) { const el = $('toast'); el.textContent = msg; el.classList.remove('hidden'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.add('hidden'), 2200) }
+function toast(msg, o = {}) {
+  const el = $('toast'); el.textContent = ''; const sp = document.createElement('span'); sp.textContent = msg; el.append(sp); el.classList.toggle('has-act', !!o.action)
+  if (o.action) { const b = document.createElement('button'); b.type = 'button'; b.className = 'toast-act'; b.textContent = o.action; b.onclick = () => { clearTimeout(toast._t); el.classList.add('hidden'); o.on?.() }; el.append(b) }
+  el.classList.remove('hidden'); clearTimeout(toast._t); toast._t = setTimeout(() => { el.classList.add('hidden'); o.expire?.() }, o.ms || 2200)
+}
 
 // ---------------- icons (inline SVG, stroke = currentColor) ----------------
 const gearPath = (() => { let d = ''; for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2, r = i % 2 ? 7.2 : 9.4, a2 = a + Math.PI / 16 * 0.55; d += `${i ? 'L' : 'M'}${(12 + r * Math.cos(a - Math.PI / 16 * 0.55)).toFixed(2)} ${(12 + r * Math.sin(a - Math.PI / 16 * 0.55)).toFixed(2)}L${(12 + r * Math.cos(a2)).toFixed(2)} ${(12 + r * Math.sin(a2)).toFixed(2)}` } return d + 'Z' })()
@@ -1055,6 +1060,7 @@ function bez(a, b, c, k, out) { const u = 1 - k; return out.set(0, 0, 0).addScal
 let simT = 0, forceDt = 0
 function tick() {
   const dt = forceDt || Math.min(clock.getDelta(), 0.05); simT += dt; let busy = drive(dt)
+  if (undoFx) { undoFx.t += dt / DUR(0.7); burst.set(Math.min(1, undoFx.t)); busy = true; if (undoFx.t >= 1) { undoFx = null; burst.stop() } }
   // doors
   let objBusy = false
   if (owns('door')) { busy = true; objBusy = true; bgEpoch++ }
@@ -1099,6 +1105,7 @@ function tick() {
     const R = model.root, oe = open
     if ((mode === 'return' || mode === 'back') && flight) { flyPose(flight.u, _fp, _fq); holder.quaternion.copy(_fq); holder.position.copy(_fp).sub(_v.set(0, Hm() / 2, 0).applyQuaternion(_fq)) }
     else { holder.position.copy(INS).sub(_v.set(0, Hm() / 2, 0)); holder.rotation.set(0, 0, 0) }
+    if (dfx) { busy = true; deleteFxTick(dt) }
     const cC = carry.cCase
     R.quaternion.copy(act === 'case' ? _rq : _q.identity()); if (cC.w > 0) R.quaternion.multiply(carrySlerp(cC, _cq3))
     R.position.set(0, Hm() / 2, 0).add(act === 'case' ? rot.offset(INS, _v) : _v.set(0, 0, 0)).addScaledVector(cC.off, cC.w).sub(_v.set(-0.62 * oe, 0, 0).applyQuaternion(R.quaternion)).add(caseOffset(_v))
@@ -1114,7 +1121,7 @@ function tick() {
     { R.getWorldPosition(_cw); if (dt > 0 && tick._cwOk) caseVelW.copy(_cw).sub(_cwPrev).divideScalar(dt); _cwPrev.copy(_cw); tick._cwOk = true }
     holder.updateMatrixWorld(true); model.seatWorld(_seat)
     const e = out, F = _F.copy(INS).lerp(inspCam(_cp), model.kind === 'cart' ? 0.5 : 0.4)
-    const isCart = model.kind === 'cart'; model.disc.scale.setScalar(isCart ? 1 + 1.8 * THREE.MathUtils.smoothstep(e, 0.3, 1) : 1)
+    const isCart = model.kind === 'cart'; model.disc.scale.setScalar((isCart ? 1 + 1.8 * THREE.MathUtils.smoothstep(e, 0.3, 1) : 1) * holder.scale.x)
     if (discFocus) { if (!qs.has('shot') && (isCart || !rot.dragging)) spin += dt * (isCart ? 0.6 : 0.35) }
     if (out < 0.001) { model.disc.position.copy(_seat); R.getWorldQuaternion(model.disc.quaternion); spin = 0 }
     else {
@@ -1399,12 +1406,77 @@ function ask({ h, p, ok, no = t('dCancel'), danger = false, ic = danger ? 'trash
     $('dlgYes').onclick = () => done(true); $('dlgNo').onclick = () => done(false); d.onclick = (e) => { if (e.target === d) done(false) }
   })
 }
-$('iDel').onclick = async () => {
-  closeMenus(); if (!(await ask({ h: t('delH'), p: t('delP').replace('%s', sel.title || t('untitled')), ok: t('delOk'), danger: true }))) return
-  const id = sel.id; await db.del(id); artCache.delete(id); holder.visible = false; model.disc.visible = false; outT = out = 0; openT = open = 0; hubT = hubP = 0; discFocus = false
-  entries = entries.filter((e) => e.id !== id); await renumber(); sel = null; doorTarget = 0; setMode('shelf'); await syncShelf(); goCam(camShelfGoal()); toast(t('deleted'))
+// ---- delete / undo ----
+// Delete = confirm → remove from IndexedDB (a failure aborts before anything moves) → the inspected case shrinks / lifts away in a
+// spring-smooth burst of sparkles → one teardown of every inspect channel → the shelf closes the gap (neighbours glide). Undo puts the
+// same entry back in the same slot (blobs stay in memory only for the toast's lifetime) with the reverse burst + the proxy's pop-in.
+const burst = createBurst(scene)
+let dfx = null, delBusy = false
+const resetInspect = () => { // every inspect channel back to rest, nothing left holding the removed item
+  dfx = null; burst.stop(); group = null; flight = null; camScripted = false; pending = null; pendingSheetOut = false; pendingSheetIn = false
+  openT = open = hubT = hubP = outT = out = flipT = flip = 0; sFlipT = sFlip = 0; sheetT = sheetK = 0; sheetDock = false; dockK = 0; caseAway = 0
+  discFocus = false; reseating = false; releaseArmed = false; for (const c of Object.values(carry)) c.w = 0
+  for (const k in MV) MV[k].set(VARS[k][0]()); rot.resetNow(); rotObj = 'case'; holder.scale.setScalar(1); holder.rotation.set(0, 0, 0)
+  holder.visible = false; for (const m of Object.values(models)) m.disc.visible = false
 }
-async function renumber() { entries.forEach((e, i) => (e.order = i)); await db.putMany(entries) }
+function deleteFxTick(dt) { // called from tick while the effect plays; returns true while busy
+  if (!dfx) return false
+  const d = dfx; d.m.step(dt); const k = THREE.MathUtils.clamp(d.m.x, 0, 1)
+  const sc = Math.max(0.001, 1 + Math.sin(k * Math.PI) * 0.05 - k * k * (3 - 2 * k) * 1.0), lift = 0.22 * k * k * (3 - 2 * k)
+  holder.scale.setScalar(sc); holder.position.copy(INS).add(_v.set(0, lift - (Hm() / 2) * sc, 0)); holder.rotation.set(0, 0.5 * k, 0)
+  if (!RM.matches) burst.set(k)
+  if (!d.m.active && !d.fin) { d.fin = true; burst.stop(); d.done() } // dfx stays until the teardown (holds the item at its final, invisible pose)
+  return true
+}
+function playDelete(e) { // resolves when the case has fully gone
+  return new Promise((res) => {
+    const m = new Mover(0), dur = DUR(0.7)
+    if (!RM.matches) { const s = specOf(e), col = e.platform === 'ps5' ? 0x6fa8ff : e.platform === 'ns' || e.platform === 'ns2' ? 0xff6b5e : 0xffffff; burst.setPR(renderer.getPixelRatio()); burst.start(_v.copy(INS).add(new THREE.Vector3(0, 0.1, 0.1)), new THREE.Vector3(s.W, s.H, s.D), col, false) }
+    m.to(1, dur); dfx = { m, done: res }; dirty = 3
+  })
+}
+async function deleteEntry(e, confirm = true) {
+  if (!e || delBusy) return
+  closeMenus()
+  if (confirm && !(await ask({ h: t('delH'), p: t('delP').replace('%s', e.title || t('untitled')), ok: t('delOk'), danger: true }))) return
+  delBusy = true; document.body.classList.add('deleting')
+  const idx = entries.findIndex((x) => x.id === e.id), inInspect = mode === 'inspect' && sel && sel.id === e.id
+  try {
+    try { await db.del(e.id) } catch (err) { console.warn('[showcase] delete failed', err); toast(t('delFail')); return }
+    artCache.delete(e.id)
+    if (inInspect) await playDelete(e)
+    // one synchronous step (no await in between: a tick in 'inspect' with the item gone re-showed the case / disc for a frame, and while a
+    // slow IndexedDB write was pending the removed model stayed parked in front of the cabinet)
+    resetInspect(); entries = entries.filter((x) => x.id !== e.id); sel = null; doorTarget = 0
+    { const m = proxies.get(e.id); if (m) { scene.remove(m); freeMats(m); proxies.delete(e.id) } LAY.delete(e.id) }
+    setMode('shelf'); syncShelf(true); fixShelfFocus(); goCam(camShelfGoal())
+    try { await renumber() } catch (err) { console.warn('[showcase] renumber failed', err) } // order is re-derived from the array order on next load
+    toast(t('deleted'), { action: t('undo'), ms: 6000, on: () => undoDelete(e, idx) })
+  } finally { delBusy = false; document.body.classList.remove('deleting') }
+}
+function fixShelfFocus() { // the removed slot may have emptied the focused shelf / page
+  if (spineClose() && !shelfFilled(shelfRow)) { const t = nextFilledShelf(shelfRow, -1) ?? nextFilledShelf(shelfRow, 1); if (t != null) shelfRow = t; else if (page > 0) goPage(page - 1, false) }
+  syncPager(); syncShelfNav()
+}
+async function undoDelete(e, idx) {
+  if (entries.some((x) => x.id === e.id)) return
+  try { await db.put(e) } catch (err) { console.warn('[showcase] undo failed', err); toast(t('delFail')); return }
+  entries.splice(Math.min(idx, entries.length), 0, e)
+  try { await renumber() } catch {}
+  await syncShelf(true)
+  const L = LAY.get(e.id), m = proxies.get(e.id)
+  if (L && mode === 'shelf' && L.cab !== page) goPage(L.cab)
+  if (m && !RM.matches) { const s = specOf(e), col = e.platform === 'ps5' ? 0x6fa8ff : e.platform === 'ns' || e.platform === 'ns2' ? 0xff6b5e : 0xffffff; burst.setPR(renderer.getPixelRatio()); burst.start(m.userData.home.p, new THREE.Vector3(s.W, s.H, s.D), col, true); undoFx = { t: 0 } }
+  toast(t('undone')); dirty = 3
+}
+let undoFx = null
+$('iDel').onclick = () => deleteEntry(sel)
+$('eDel').onclick = async () => {
+  const e = editing && editing.id ? entries.find((x) => x.id === editing.id) : null; if (!e || e.sample) return
+  if (!(await ask({ h: t('delH'), p: t('delP').replace('%s', e.title || t('untitled')), ok: t('delOk'), danger: true }))) return
+  await closeEditor(false); deleteEntry(entries.find((x) => x.id === e.id), false)
+}
+async function renumber() { const ch = []; entries.forEach((e, i) => { if (e.order !== i) { e.order = i; ch.push(e) } }); if (ch.length) await db.putMany(ch) }
 async function move(dir) {
   closeMenus(); if (fSort !== 'custom') { fSort = 'custom'; $('sort').value = 'custom' } const i = entries.findIndex((e) => e.id === sel.id), j = i + dir; if (j < 0 || j >= entries.length) return
   ;[entries[i], entries[j]] = [entries[j], entries[i]]; await renumber(); await syncShelf(true); proxies.get(sel.id).userData.glide = null; const m = proxies.get(sel.id); m.position.copy(INS); m.quaternion.copy(qFront)
@@ -1422,8 +1494,7 @@ function syncPlat() {
   const p = draft.platform || 'ps5'
   for (const b of $('platSeg').children) b.setAttribute('aria-pressed', String(b.dataset.p === p))
   $('keyWrap').classList.toggle('hidden', p !== 'ns2'); $('fKey').checked = !!draft.keyCard
-  $('platNote').textContent = t('pn_' + p)
-}
+  }
 $('platSeg').onclick = (e) => { const p = e.target.dataset?.p; if (!p || !draft || p === draft.platform) return; draftDirty = true; draft.platUser = true; setPlatform(p) }
 function setPlatform(p) {
   draft.platform = p; if (p !== 'ns2') draft.keyCard = false
@@ -1438,11 +1509,11 @@ function openEditor(entry) {
   group = null; flight = null; for (const c of Object.values(carry)) c.w = 0
   closeMenus(); draftDirty = false; prevMode = mode; prevSel = sel
   editing = entry || { id: null }
-  draft = entry ? JSON.parse(JSON.stringify({ ...entry, slots: Object.fromEntries(Object.entries(entry.slots || {}).map(([k, v]) => [k, { crop: v.crop }])) })) : { title: '', platform: 'ps5', band: true, slots: {} }
+  draft = entry ? JSON.parse(JSON.stringify({ ...entry, slots: Object.fromEntries(Object.entries(entry.slots || {}).map(([k, v]) => [k, { crop: v.crop }])) })) : { title: '', platform: 'ps5', slots: {} }
   if (entry) for (const k of SLOT_KEYS) if (entry.slots?.[k]?.blob) draft.slots[k].blob = entry.slots[k].blob
   lkResults = []; lkRender(null); loadCatalog()
   draftImgs = {}; draft.platform ||= 'ps5'; useModel(draft.platform); syncPlat()
-  $('fTitle').value = draft.title || ''; $('fBand').checked = draft.band !== false
+  $('fTitle').value = draft.title || ''; $('eDel').classList.toggle('hidden', !entry || !!entry.sample)
   $('eTitleH').textContent = entry ? t('eEdit') : t('eNew')
   $('editor').classList.remove('hidden'); $('crop').classList.add('hidden')
   // stage the full model for live preview
@@ -1462,7 +1533,7 @@ function editorCam() {
   const dir = new THREE.Vector3(0.3, 0.08, 1).normalize(); return { p: INS.clone().addScaledVector(dir, d), t: INS.clone() }
 }
 function rebuildDraft() {
-  draft.title = $('fTitle').value.trim(); draft.band = $('fBand').checked
+  draft.title = $('fTitle').value.trim()
   draftArt = buildArt(draft, draftImgs); model.setArt(draftArt); dirty = 3
 }
 function scheduleArt() { if (artTimer) return; artTimer = setTimeout(() => { artTimer = 0; rebuildDraft(); renderSlotThumbs() }, mobile ? 90 : 50) }
@@ -1534,8 +1605,6 @@ async function applyLookup(r, picked) {
       // package scans (portrait, already carry platform branding) → no generated band/badge, trim the scan border
       const scan = img && img.height / img.width > 1.2 && /cdjapan/.test(r.cover || '')
       draft.slots.front = { blob, crop: { x: 0, y: 0, s: 1 }, auto: true }; draftImgs.front = img
-      // retail art already carries its platform band/logo → generated overlay off by default (user can re-enable)
-      if (!draft.bandUser) { draft.band = false; $('fBand').checked = false }
       filled.push('cover')
     } else toast(t('lkFail'))
   }
@@ -1544,7 +1613,7 @@ async function applyLookup(r, picked) {
 }
 $('fTitle').addEventListener('input', () => { clearTimeout(lkTimer); lkTimer = setTimeout(() => runLookup($('fTitle').value), 350) })
 $('fTitle').addEventListener('keydown', (e) => { if (e.key === 'Enter' && lkResults[0]) { e.preventDefault(); applyLookup(lkResults[0], true) } })
-$('fTitle').oninput = scheduleArt; $('fBand').onchange = () => { draft.bandUser = true; scheduleArt() }
+$('fTitle').oninput = scheduleArt
 async function cancelEditor() { if (draftDirty && !(await ask({ h: t('discH'), p: t('discP'), ok: t('discOk'), no: t('discNo'), danger: true, ic: 'alert' }))) return; closeEditor(false) }
 $('eCancel').onclick = () => cancelEditor(); $('eClose').onclick = () => cancelEditor()
 $('ebody').addEventListener('input', () => { draftDirty = true }); $('ebody').addEventListener('change', () => { draftDirty = true })
@@ -1557,9 +1626,8 @@ $('eSave').onclick = async () => {
     draft.title = $('fTitle').value.trim()
   }
   if (!draft.title) draft.title = t('untitled')
-  draft.band = $('fBand').checked
   const isNew = !editing.id
-  const e = { id: editing.id || uid(), title: draft.title, platform: draft.platform || 'ps5', keyCard: draft.platform === 'ns2' && !!draft.keyCard, lookup: draft.lookup || null, bandUser: !!draft.bandUser, band: draft.band, slots: draft.slots, createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(), order: isNew ? entries.length : editing.order }
+  const e = { id: editing.id || uid(), title: draft.title, platform: draft.platform || 'ps5', keyCard: draft.platform === 'ns2' && !!draft.keyCard, lookup: draft.lookup || null, slots: draft.slots, createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(), order: isNew ? entries.length : editing.order }
   await db.put(e)
   if (isNew) entries.push(e); else entries[entries.findIndex((x) => x.id === e.id)] = e
   artCache.set(e.id, draftArt); if (!isNew) await refreshProxy(e); else artCache.set(e.id, draftArt)
@@ -1612,14 +1680,14 @@ function drawCrop() {
     if (draft.keyCard) { cg.fillStyle = 'rgba(230,0,18,.8)'; cg.beginPath(); cg.arc(T.w - 34, 34, 22, 0, 7); cg.fill() }
   } else if (draft.platform === 'ns' || draft.platform === 'ns2') {
     const two = draft.platform === 'ns2', bh = two ? NS2_BAND : NS_BAND, gc = 'rgba(230,0,18,.55)'
-    if (T.band && $('fBand').checked) {
+    if (T.band) {
       if (!two) { if (cropKey === 'front') { cg.fillStyle = gc; cg.fillRect(0, 0, bh, bh); cg.fillStyle = '#fff'; cg.font = `600 ${Math.min(26, 13 / sc)}px sans-serif`; cg.fillText('LOGO', 10, bh / 2 + 6) } }
       else { cg.fillStyle = gc; cg.fillRect(0, 0, T.w, bh); cg.fillStyle = '#fff'; cg.font = `600 ${Math.min(30, 14 / sc)}px sans-serif`; cg.fillText(cropKey === 'spine' ? 'NS2' : t('guideBand'), 12, bh / 2 + 6) }
       if (two && cropKey !== 'spine') { const F = NS2_FRAME; cg.fillStyle = gc; cg.fillRect(0, bh, F, T.h - bh); cg.fillRect(T.w - F, bh, F, T.h - bh); cg.fillRect(0, T.h - F, T.w, F); if (cropKey === 'front' && draft.keyCard) { cg.fillStyle = 'rgba(255,255,255,.8)'; cg.fillRect(F, T.h - F - 92, T.w - 2 * F, 92) } }
     }
     cg.strokeStyle = 'rgba(217,137,63,.95)'; cg.lineWidth = lw; cg.setLineDash([12 / sc, 9 / sc]); cg.strokeRect(BLEED, BLEED, T.w - 2 * BLEED, T.h - 2 * BLEED); cg.setLineDash([])
   } else {
-    if (T.band && $('fBand').checked) { cg.fillStyle = 'rgba(255,255,255,.82)'; cg.fillRect(0, 0, T.w, BANNER); cg.fillStyle = 'rgba(47,111,99,.95)'; cg.font = `600 ${Math.min(30, 14 / sc)}px sans-serif`; cg.fillText(cropKey === 'spine' ? 'PS5' : t('guideBand'), 12, BANNER / 2 + 6) }
+    if (T.band) { cg.fillStyle = 'rgba(255,255,255,.82)'; cg.fillRect(0, 0, T.w, BANNER); cg.fillStyle = 'rgba(47,111,99,.95)'; cg.font = `600 ${Math.min(30, 14 / sc)}px sans-serif`; cg.fillText(cropKey === 'spine' ? 'PS5' : t('guideBand'), 12, BANNER / 2 + 6) }
     cg.strokeStyle = 'rgba(217,137,63,.95)'; cg.lineWidth = lw; cg.setLineDash([12 / sc, 9 / sc]); cg.strokeRect(BLEED, BLEED, T.w - 2 * BLEED, T.h - 2 * BLEED); cg.setLineDash([])
   }
   cg.restore()
@@ -1734,9 +1802,9 @@ async function boot() {
   for (const b of $('viewSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === viewMode))
   try {
     entries = await db.all()
-    // migrate: auto-filled (catalog/lookup) covers default to no generated band unless the user chose otherwise
-    const fix = entries.filter((e) => e.slots?.front?.auto && !e.bandUser && e.band !== false)
-    if (fix.length) { fix.forEach((e) => (e.band = false)); await db.putMany(fix) }
+    // the platform marker is mandatory: entries saved while the old switch was off are treated as on (stale flags dropped)
+    const fix = entries.filter((e) => 'band' in e || 'bandUser' in e)
+    if (fix.length) { fix.forEach((e) => { delete e.band; delete e.bandUser }); await db.putMany(fix).catch(() => {}) }
     if (!localStorage.getItem('showcase-seeded')) {
       const s = { id: 'sample-re4', sample: true, title: 'Resident Evil 4 Gold Edition', platform: 'ps5', order: 0, createdAt: Date.now(), slots: {} }
       await db.put(s); entries = await db.all(); localStorage.setItem('showcase-seeded', '1')

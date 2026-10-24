@@ -323,7 +323,7 @@ export function genBooklet(cover, title) {
 }
 /** Full art set for the case model from entry + decoded images. */
 export function buildArt(entry, imgs) {
-  const sl = entry.slots || {}, cov = imgs.front, band = entry.band !== false
+  const sl = entry.slots || {}, cov = imgs.front, band = true
   const color = cov ? dominantColor(cov) : null
   const P = entry.platform || 'ps5', K = P === 'ns2' && !!entry.keyCard
   const inner = imgs.inner ? genInner(imgs.inner, sl.inner?.crop, cov, color, P) : null // no inner photo → plain paper back
